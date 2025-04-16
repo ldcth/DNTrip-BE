@@ -1,0 +1,6 @@
+.env
+__pycache__/
+scrapper/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
