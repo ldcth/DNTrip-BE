@@ -9,8 +9,7 @@ import uuid
 # Import custom modules
 from agents.llm import LLMAgent # Keep if needed for /api/ask
 # Import the NEW class from agents/graph.py
-from agents.graph import TravelPlannerGraph
-from agents.graph_sample import Agent
+from agents.graph import Agent
 load_dotenv()
 
 # Initialize the Flask application

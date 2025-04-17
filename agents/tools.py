@@ -1,53 +1,30 @@
 # tools.py
-from langchain_core.tools import tool
+from langchain_core.tools import tool, StructuredTool
+from pydantic import BaseModel, Field
+from services.tsp_algorithm import optimize_distance_tour
+import json
+import traceback
 
-@tool
-def search_flights(departure_city: str, destination_city: str, departure_date: str, return_date: str | None = None) -> str:
-    """
-    Searches for available flights based on the provided criteria.
-    (Placeholder implementation)
-    """
-    print(f"--- Searching Flights ---")
-    print(f"From: {departure_city} To: {destination_city}")
-    print(f"Dates: {departure_date} to {return_date}")
-    # In a real scenario, this would call a flight search API
-    return f"Found flights from {departure_city} to {destination_city} on {departure_date}." # Example response
+class TravelPlanArgs(BaseModel):
+    travel_duration: str = Field(description="The duration of the trip, e.g., '3 days 2 nights', '1 week', '5 ngay 4 dem'.")
 
-@tool
-def book_flight(flight_details: dict) -> str:
+@tool("plan_da_nang_trip", args_schema=TravelPlanArgs)
+def plan_da_nang_trip_tool(travel_duration: str) -> str:
     """
-    Books a flight based on the provided details.
-    (Placeholder implementation)
+    Plans a detailed travel itinerary for Da Nang, Vietnam based on a specified duration.
+    Generates a day-by-day plan including places to visit (like Ba Na Hills, Marble Mountains, beaches, pagodas)
+    and restaurants for lunch and dinner, ensuring locations are suitable for morning, afternoon, or evening.
+    The tool requires the travel duration as input (e.g., '3 days 2 nights', '1 week').
+    Returns the plan as a JSON string.
     """
-    print(f"--- Booking Flight ---")
-    print(f"Details: {flight_details}")
-    # In a real scenario, this would call a booking API
-    return f"Successfully booked flight. Confirmation: XYZ123" # Example response
-
-@tool
-def search_hotels(location: str, check_in_date: str, check_out_date: str) -> str:
-    """
-    Searches for available hotels in a specific location and date range.
-    (Placeholder implementation)
-    """
-    print(f"--- Searching Hotels ---")
-    print(f"Location: {location}")
-    print(f"Dates: {check_in_date} to {check_out_date}")
-    # In a real scenario, this would call a hotel search API
-    return f"Found hotels in {location} for {check_in_date} to {check_out_date}." # Example response
-
-@tool
-def book_hotel(hotel_details: dict) -> str:
-    """
-    Books a hotel based on the provided details.
-    (Placeholder implementation)
-    """
-    print(f"--- Booking Hotel ---")
-    print(f"Details: {hotel_details}")
-    # In a real scenario, this would call a booking API
-    return f"Successfully booked hotel. Confirmation: ABC987" # Example response
+    print(f"--- Calling Planner Tool with duration: {travel_duration} ---")
+    try:
+        plan_result = optimize_distance_tour(travel_duration)
+        return json.dumps(plan_result, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error during trip planning: {e}")
+        traceback.print_exc()
+        return json.dumps({"error": f"Failed to generate plan: {e}"})
 
 # Add more tools as needed (e.g., search_activities, check_weather, schedule_event)
 
-# List all tools
-all_tools = [search_flights, book_flight, search_hotels, book_hotel]

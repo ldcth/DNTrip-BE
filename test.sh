@@ -3,3 +3,4 @@ curl -X POST http://localhost:3001/api/travel -H "Content-Type: application/json
 curl -X POST http://localhost:3001/api/travel -H "Content-Type: application/json" -d '{"question": "What is my last question?"}'
 curl -X POST http://localhost:3001/api/travel -H "Content-Type: application/json" -d '{"question": "Who are the top 5 players in the world?"}'
 curl -X POST http://localhost:3001/api/travel -H "Content-Type: application/json" -d '{"question": "What is the weather in Da Nang?"}'
+curl -X POST http://localhost:3001/api/travel -H "Content-Type: application/json" -d '{"question": "plan a 3 days 2 nights trip to Da Nang?"}'

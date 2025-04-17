@@ -237,12 +237,13 @@ def optimize_distance_tour(travel_duration):
     # --- 1. Load Data ---
     location_hotel_list = get_location_hotel()
     if not location_hotel_list:
-        print("Failed to get hotel information.")
-        return "Itinerary generation failed: No hotel data."
+        # Return an error structure or raise an exception
+        return {"error": "Itinerary generation failed: No hotel data."}
     location_hotel = location_hotel_list[0]
     hotel_name = location_hotel["place"]
     hotel_coords = tuple(location_hotel["location"])
-    print(f"Selected Hotel: {hotel_name} at {hotel_coords}")
+    # Keep this print for feedback during direct script execution
+    print(f"Selected Hotel: {hotel_name} at {hotel_coords}") 
 
     must_visit_places = get_must_visit_places()
     restaurants = get_restaurants()
@@ -251,8 +252,13 @@ def optimize_distance_tour(travel_duration):
     selected_places_ever = set()
     selected_restaurants_ever = set()
 
-    # Create a combined map for easier name lookup later if needed
-    # Although we process sequentially, a map can still be useful
+    # --- Initialize Result Structure --- 
+    itinerary_result = {
+        "hotel": {"name": hotel_name, "coords": hotel_coords},
+        "daily_plans": []
+    }
+
+    # Create a combined map (optional, but can be useful)
     all_locations_map = {hotel_coords: hotel_name}
     if must_visit_places:
         all_locations_map.update({tuple(p["location"]): p["place"] for p in must_visit_places})
@@ -264,86 +270,97 @@ def optimize_distance_tour(travel_duration):
     if not restaurants:
         print("Warning: No restaurants loaded.")
 
-    print("\n--- Generating Itinerary ---")
-
     # --- 2. Loop Through Days ---    
     for day_index in range(travel_duration):
-        print(f"\n--- Day {day_index + 1} --- ")
+        day_data = {
+            "day": day_index + 1,
+            "planned_stops": {},
+            "route": []
+        }
         
         # --- 3. Select Locations for the Day (Ensuring Uniqueness) ---
-        daily_plan = {}
+        daily_plan_selection = {}
         
-        # Morning (1 place)
         morning_places = select_places(must_visit_places, 'morning', 1, selected_places_ever)
-        daily_plan['Morning'] = morning_places
-        for place in morning_places: # Update tracker
-            selected_places_ever.add(place['place'])
+        daily_plan_selection['Morning'] = morning_places
+        for place in morning_places: selected_places_ever.add(place['place'])
 
-        # Lunch (1 restaurant)
         lunch_restaurants = select_restaurants(restaurants, 1, selected_restaurants_ever)
-        daily_plan['Lunch'] = lunch_restaurants
-        for r in lunch_restaurants: # Update tracker
-            selected_restaurants_ever.add(r['place'])
+        daily_plan_selection['Lunch'] = lunch_restaurants
+        for r in lunch_restaurants: selected_restaurants_ever.add(r['place'])
 
-        # Afternoon (1 place)
         afternoon_places = select_places(must_visit_places, 'afternoon', 1, selected_places_ever)
-        daily_plan['Afternoon'] = afternoon_places
-        for place in afternoon_places: # Update tracker
-            selected_places_ever.add(place['place'])
+        daily_plan_selection['Afternoon'] = afternoon_places
+        for place in afternoon_places: selected_places_ever.add(place['place'])
         
-        # Dinner (1 restaurant)
         dinner_restaurants = select_restaurants(restaurants, 1, selected_restaurants_ever)
-        daily_plan['Dinner'] = dinner_restaurants
-        for r in dinner_restaurants: # Update tracker
-             selected_restaurants_ever.add(r['place'])
+        daily_plan_selection['Dinner'] = dinner_restaurants
+        for r in dinner_restaurants: selected_restaurants_ever.add(r['place'])
        
-        # Evening (1-2 places)
         evening_count = random.randint(1, 2)
         evening_places = select_places(must_visit_places, 'evening', evening_count, selected_places_ever)
-        daily_plan['Evening'] = evening_places
-        for place in evening_places: # Update tracker
-             selected_places_ever.add(place['place'])
+        daily_plan_selection['Evening'] = evening_places
+        for place in evening_places: selected_places_ever.add(place['place'])
         
-        # --- 4. Print Planned Stops --- 
-        print("Planned Stops:")
-        for time_slot, items in daily_plan.items():
-            names = [item['place'] for item in items]
-            print(f"  {time_slot}: {', '.join(names) if names else 'None'}")
+        # --- 4. Populate Planned Stops in Result --- 
+        for time_slot, items in daily_plan_selection.items():
+            day_data["planned_stops"][time_slot] = [item['place'] for item in items]
             
-        # --- 5. Generate and Print Sequential Route --- 
-        print("\nSequential Route:")
+        # --- 5. Generate Sequential Route and Populate in Result --- 
         current_coords = hotel_coords
         current_name = hotel_name
-        print(f"  - Start at: {current_name}")
+        step_counter = 0
+        # Add starting point to the route
+        day_data["route"].append({
+            "step": step_counter,
+            "time_slot": "Start",
+            "type": "hotel",
+            "name": current_name,
+            "coords": current_coords,
+            "distance_from_previous_km": 0.0
+        })
 
         # Process time slots sequentially
         for time_slot in ['Morning', 'Lunch', 'Afternoon', 'Dinner', 'Evening']:
-            items_for_slot = daily_plan.get(time_slot, [])
-            if not items_for_slot:
-                 print(f"  - No location selected for {time_slot}.")
-                 continue # Skip if nothing was selected for this slot
+            items_for_slot = daily_plan_selection.get(time_slot, [])
                  
             for item in items_for_slot:
+                step_counter += 1
                 next_coords = tuple(item["location"])
                 next_name = item["place"]
-                
                 distance_km = haversine(current_coords, next_coords)
-                print(f"  - {time_slot}: Go to {next_name}. Distance from {current_name} = {distance_km:.2f} km")
+                
+                # Determine type (simple check based on time slot)
+                location_type = "restaurant" if time_slot in ['Lunch', 'Dinner'] else "place"
+
+                day_data["route"].append({
+                    "step": step_counter,
+                    "time_slot": time_slot,
+                    "type": location_type,
+                    "name": next_name,
+                    "coords": next_coords,
+                    "distance_from_previous_km": round(distance_km, 2)
+                })
                 
                 # Update current location for the next step
                 current_coords = next_coords
                 current_name = next_name
+        
+        itinerary_result["daily_plans"].append(day_data)
             
-    print("\n--- End Itinerary Generation ---")
-    return "Itinerary generation complete."
+    # Removed internal print statements for itinerary generation
+    return itinerary_result # Return the structured data
 
 
 # --- Test function ---
 def test_optimize_distance_tour():
-    print("Testing itinerary generation for '2 days 1 nights'...")
-    result_status = optimize_distance_tour('3 days 2 nights')
-    print(f"\n--- Test Completion Status ---")
-    print(result_status)
+    print("Testing itinerary generation for '3 days 2 nights'...")
+    # Store the returned dictionary
+    full_plan = optimize_distance_tour('3 days 2 nights') 
+    
+    # Print the result using json.dumps for pretty printing
+    print("\n--- Generated Itinerary Data ---")
+    print(json.dumps(full_plan, indent=2, ensure_ascii=False)) # ensure_ascii=False for non-English characters
     print("--- End Test ---")
 
 if __name__ == "__main__":
