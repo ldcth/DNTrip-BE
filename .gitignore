@@ -4,3 +4,4 @@ scrapper/data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+env.sh

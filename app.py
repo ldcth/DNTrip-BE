@@ -21,31 +21,10 @@ bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 CORS(app)
 
-# --- Initialize Existing Simple LLM Agent ---
-# Keep this if you still use the /api/ask endpoint
+
 llm_agent = LLMAgent()
 
-# --- Initialize LangGraph Travel Planner Application using the Class ---
-# Database path for conversation state checkpointing
-# DATABASE_PATH = os.environ.get("TRAVEL_DB_PATH", "travel_agent_conversations.sqlite")
-# Initialize the planner graph instance variable to None initially
 travel_planner_instance = Agent()
-
-# travel_planner_instance = None
-# try:
-# #     # Create an instance of the TravelPlannerGraph class ONCE when the server starts
-#     # travel_planner_instance = TravelPlannerGraph(db_path=DATABASE_PATH)
-#     travel_planner_instance = Agent()
-#     # Check if the internal app was compiled successfully during instantiation
-#     # if not travel_planner_instance.app:
-#     #      raise RuntimeError("TravelPlannerGraph internal app failed to compile.")
-#     # print("--- Flask App: TravelPlannerGraph Initialized Successfully ---")
-# except Exception as e:
-#     # Log fatal error if TravelPlannerGraph instantiation fails
-# #     print(f"FATAL: Could not initialize TravelPlannerGraph: {e}")
-# #     # travel_planner_instance will remain None or have app=None
-
-# --- Basic Routes ---
 
 @app.route("/")
 def index():
@@ -90,21 +69,23 @@ def handle_travel_chat():
     if not query:
         return jsonify({"error": "Missing 'question' in request"}), 400
 
-    thread_id = data.get('thread_id', "123")
+    thread_id = data.get('thread_id', "123534") # Consider generating a UUID if none provided
     print(f"[/api/travel] {'New' if not data.get('thread_id') else 'Continuing'} conversation with thread_id: {thread_id}")
 
-    assistant_response = travel_planner_instance.run_conversation(query)
-    print(f"[/api/travel] Assistant Response: {assistant_response}")
+    # Call the agent which now returns a dictionary
+    agent_result = travel_planner_instance.run_conversation(query)
+    response_content = agent_result.get("response", "Error: No response content found.")
+    intent = agent_result.get("intent", "unknown") # Get the intent
 
-    if isinstance(assistant_response, list):
-        response_content = assistant_response[-1].content
-    else:
-        response_content = assistant_response
+    print(f"[/api/travel] Intent: {intent}, Assistant Response: {response_content}")
 
-    if str(response_content).startswith(("Error:", "An error occurred:")):
-        return jsonify({"error": response_content}), 500
+    # Check for errors based on intent or response content
+    if intent == "error" or str(response_content).startswith(("Error:", "An error occurred:")):
+         # Use the response_content which might contain a specific error message
+        return jsonify({"error": response_content, "intent": "error", "thread_id": thread_id}), 500
 
-    return jsonify({"response": response_content, "thread_id": thread_id})
+    # Return the successful response including the intent
+    return jsonify({"response": response_content, "intent": intent, "thread_id": thread_id})
 
 # --- Health Check Endpoint (Optional but Recommended) ---
 @app.route('/health', methods=['GET'])
