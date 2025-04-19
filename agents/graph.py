@@ -10,6 +10,7 @@ from agents.state import AgentState
 from agents.tools import plan_da_nang_trip_tool, book_flights_tool
 import sqlite3
 import json
+import logging
 
 load_dotenv()
 
@@ -92,9 +93,17 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
             self.exists_action,
             {True: "action", False: END}
         )
-        self.graph.add_edge("action", "call_llm_with_tools")
         self.graph.add_edge("direct_llm_answer", END)
         self.graph.add_edge("mark_not_related", END)
+
+        self.graph.add_conditional_edges(
+            "action",
+            self.route_after_action,
+            {
+                "finish": END,
+                "continue": "call_llm_with_tools"
+            }
+        )
 
         self.memory = memory
         self.graph = self.graph.compile(checkpointer=self.memory)
@@ -114,6 +123,7 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
 Respond only with the category name.""")
 
         try:
+            print(f"Full message 123123: {state['messages']}")
             response = self.router_llm.invoke([routing_prompt, user_message])
             query_type = response.content.strip().lower()
             print(f"Initial routing for query '{user_message.content[:50]}...': {query_type}")
@@ -267,7 +277,11 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
         return has_tools
 
     def take_action(self, state: AgentState):
-        """Executes tools based on the LLM's request."""
+        """Executes tools based on the LLM's request. 
+        If it's a successful book_flights call resulting in a list of flights,
+        it puts the parsed list into final_response_data and returns.
+        Otherwise, it prepares content for a ToolMessage and returns that.
+        """
         last_message = state['messages'][-1]
 
         if not (isinstance(last_message, AIMessage) and
@@ -275,11 +289,12 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
                 isinstance(last_message.tool_calls, list) and
                 len(last_message.tool_calls) > 0):
              print("Error: take_action called unexpectedly. Last message doesn't have valid tool calls.")
-             error_message = ToolMessage(tool_call_id="error", name="error", content="Internal error: Attempted to execute tools without a valid request.")
-             return {'messages': [error_message]}
+             # Return message to let graph continue and potentially report error
+             return {'messages': [ToolMessage(tool_call_id="error", name="error", content="Internal error: Agent tried to take action without a valid tool call.")]}
 
         tool_calls = last_message.tool_calls
-        results = []
+        tool_messages_to_return = [] # Renamed from results
+        
         for t in tool_calls:
             tool_call_id = t.get('id')
             if not tool_call_id:
@@ -292,35 +307,117 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
             print(f"Attempting to call tool: {tool_name} with args: {tool_args} (Call ID: {tool_call_id})")
             if tool_name in self.tools:
                 tool_to_use = self.tools[tool_name]
+                result_content_for_llm = "Error: Tool execution failed to produce content."
                 try:
+                    # --- Execute the tool --- 
                     if isinstance(tool_args, dict):
-                        result = tool_to_use.invoke(tool_args)
+                        raw_result = tool_to_use.invoke(tool_args)
                     else:
                          print(f"Warning: Tool args for {tool_name} are not a dict: {tool_args}. Attempting to invoke anyway.")
-                         result = tool_to_use.invoke(tool_args)
+                         raw_result = tool_to_use.invoke(tool_args)
 
-                    if not isinstance(result, str):
-                        print(f"Warning: Tool {tool_name} returned non-string result: {type(result)}. Converting to string.")
-                        result_content = str(result)
-                    else:
-                         result_content = result
+                    # --- Decide how to handle the result --- 
+                    if tool_name == 'book_flights':
+                        try:
+                            # Parse the JSON string result from the tool
+                            parsed_data = json.loads(raw_result) 
+                            
+                            # --- Check the structure of the parsed data --- 
+                            flight_list = None 
+                            
+                            # Case A: It's a dictionary containing a 'flights' list
+                            if isinstance(parsed_data, dict) and 'flights' in parsed_data and isinstance(parsed_data['flights'], list):
+                                flight_list = parsed_data['flights']
+                                print(f"Found 'flights' key with a list of {len(flight_list)} items.")
+                            
+                            # Case B: It's directly a list (fallback, less likely based on logs)
+                            elif isinstance(parsed_data, list):
+                                flight_list = parsed_data
+                                print("Parsed data is directly a list.")
+                            
+                            # --- Process based on extracted flight_list or original parsed_data --- 
+                            
+                            # If we extracted a valid flight list:
+                            if flight_list is not None: 
+                                if flight_list: # List is not empty
+                                    logging.info(f"Storing raw flight list ({len(flight_list)} items) in final_response_data.")
+                                    return {"final_response_data": flight_list} 
+                                else: # List is empty
+                                    result_content_for_llm = "No flights found matching your criteria."
+                                    print("Flight tool returned empty list. Preparing message for LLM.")
+                            
+                            # If we didn't get a list, check for error/message dicts in the original parsed_data
+                            elif isinstance(parsed_data, dict) and 'error' in parsed_data:
+                                result_content_for_llm = f"Error from flight tool: {parsed_data['error']}"
+                                print("Flight tool returned error dict. Preparing message for LLM.")
+                            elif isinstance(parsed_data, dict) and 'message' in parsed_data:
+                                 result_content_for_llm = parsed_data['message']
+                                 print("Flight tool returned message dict. Preparing message for LLM.")
+                            
+                            # Handle other unexpected formats
+                            else:
+                                print(f"Warning: Unexpected data format from book_flights tool: {type(parsed_data)}. Content: {str(raw_result)[:200]}")
+                                result_content_for_llm = f"Received unexpected data format from the flight tool."
 
-                    results.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=result_content))
+                        # Handle JSON parsing errors
+                        except json.JSONDecodeError:
+                            print(f"Error: book_flights tool did not return valid JSON: {raw_result}")
+                            result_content_for_llm = f"Error: Flight tool returned invalid data."
+                        # Handle other processing errors
+                        except Exception as format_err:
+                             print(f"Error processing flight data: {format_err}")
+                             result_content_for_llm = f"Error processing flight results: {format_err}"
+                        
+                        # If we reach here, it means we need to send a ToolMessage back to LLM
+                        tool_messages_to_return.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=result_content_for_llm))
 
+                    # For tools OTHER than book_flights
+                    else: 
+                        # Ensure result is a string for the ToolMessage
+                        if not isinstance(raw_result, str):
+                            print(f"Warning: Tool {tool_name} returned non-string result: {type(raw_result)}. Converting to string.")
+                            result_content_for_llm = str(raw_result)
+                        else:
+                             result_content_for_llm = raw_result
+                        
+                        # Append ToolMessage for other tools
+                        tool_messages_to_return.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=result_content_for_llm))
+
+                # Handle errors during tool invocation itself
                 except Exception as e:
-                    print(f"Error invoking tool {tool_name} with args {tool_args}: {e}")
+                    print(f"Error invoking/processing tool {tool_name} with args {tool_args}: {e}")
                     traceback.print_exc()
-                    results.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=f"Error executing tool {tool_name}: {e}"))
+                    # Append error message for LLM
+                    tool_messages_to_return.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=f"Error executing tool {tool_name}: {e}"))
+            
+            # Handle case where tool name is not found
             else:
                  print(f"Warning: Tool '{tool_name}' not found in available tools {list(self.tools.keys())}.")
-                 results.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=f"Error: Tool '{tool_name}' is not available."))
+                 # Append error message for LLM
+                 tool_messages_to_return.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=f"Error: Tool '{tool_name}' is not available."))
 
-        print("--- Action Results ---")
-        for res in results:
-            content_preview = res.content[:300].replace('\n', ' ') + ('...' if len(res.content) > 300 else '')
-            print(f"  Tool: {res.name}, ID: {res.tool_call_id}, Result: {content_preview}")
-        print("--- Returning Action Results to LLM ---")
-        return {'messages': results}
+        # --- Return accumulated ToolMessages (if any) --- 
+        # This part is reached only if final_response_data was NOT set and returned earlier
+        print("--- Action Node Completed --- ")
+        if tool_messages_to_return:
+            print(f"Returning {len(tool_messages_to_return)} ToolMessage(s) to LLM for processing.")
+            for msg in tool_messages_to_return:
+                 print(f"  Tool: {msg.name}, Content: {msg.content[:200]}...")
+            return {'messages': tool_messages_to_return} 
+        else:
+             # This case should not happen if logic above is correct 
+             # (either final_response_data is returned, or a tool message is generated)
+             print("CRITICAL WARNING: take_action finished without setting final_response_data or preparing ToolMessages.")
+             return {"messages": [ToolMessage(tool_call_id="error", name="error", content="Internal error: Action node finished unexpectedly.")]}
+
+    def route_after_action(self, state: AgentState):
+        """Checks if final_response_data is set to decide the next step."""
+        if state.get("final_response_data") is not None:
+            print("Routing after action: final_response_data found. Finishing.")
+            return "finish"
+        else:
+            print("Routing after action: No final_response_data. Continuing to LLM.")
+            return "continue"
 
     def mark_not_related_node(self, state: AgentState):
         """Sets the final message to 'Not Related'."""
@@ -340,24 +437,34 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
         intent = "error" # Default intent
 
         try:
-            initial_state = {"messages": messages, "relevance_decision": None, "query_type": None, "intent": None}
+            initial_state = {"messages": messages, "relevance_decision": None, "query_type": None, "intent": None, "final_response_data": None}
             final_state = self.graph.invoke(initial_state, config=thread)
 
-            # Determine intent from final state if available
+            # Determine intent from final state if available (might be set even if final_response_data is used)
             if final_state:
-                intent = final_state.get("intent", intent) # Get intent set during routing
-                # Handle specific end states overrides
-                if final_state.get("query_type") in ["persona", "history"] and intent is None:
-                    intent = "direct_answer" # Specific intent for direct persona/history answers
-                if final_state.get("relevance_decision") == "end" and intent is None:
-                     # If relevance check decided 'end' and no other intent was set later
+                intent = final_state.get("intent", intent)
+                if intent == 'book_flights' and final_state.get("final_response_data") is not None:
+                    # If book_flights intent led to direct data, ensure intent is set correctly
+                    intent = "book_flights"
+                elif final_state.get("query_type") in ["persona", "history"] and intent == "error": # Use error as default check
+                    intent = "direct_answer"
+                elif final_state.get("relevance_decision") == "end" and intent == "error":
                      intent = "not_related"
-
-            if final_state and 'messages' in final_state and final_state['messages']:
+                     
+            # --- Check for final_response_data first --- 
+            if final_state and final_state.get("final_response_data") is not None:
+                 response_content = final_state["final_response_data"]
+                 print(f"Graph finished. Using final_response_data (Type: {type(response_content)}). Intent: {intent}")
+                 # Ensure intent is correctly set for this case
+                 if intent != "book_flights":
+                     logging.warning(f"final_response_data was set, but intent is '{intent}'. Forcing to 'book_flights'.")
+                     intent = "book_flights"
+            
+            # --- Otherwise, process final message as before --- 
+            elif final_state and 'messages' in final_state and final_state['messages']:
                  final_message = final_state['messages'][-1]
-                 print(f"Graph finished. Final message type: {type(final_message)}")
+                 print(f"Graph finished. Processing final message (Type: {type(final_message)}). Intent: {intent}")
 
-                 # Extract final response content based on message type
                  if isinstance(final_message, AIMessage):
                      if hasattr(final_message, 'tool_calls') and final_message.tool_calls:
                          print("Warning: Graph ended with an AIMessage containing tool calls. The conversation might be incomplete.")
@@ -366,17 +473,23 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
                      # If intent wasn't set earlier (e.g., direct AIMessage from relevance check 'end'), check message content
                      if intent == "error" and "I apologize, but I specialize only in travel related to Da Nang" in response_content:
                          intent = "not_related"
+                     # Explicitly set intent if LLM answers directly without tool use after intent routing
+                     elif intent in ["plan_trip", "book_flights", "search_info", "general_qa"] and not hasattr(final_message, 'tool_calls'):
+                         print(f"LLM answered directly after intent routing ({intent}). Setting final intent.")
+                         pass # Intent should already be correctly set from routing
+                     elif intent == "error": # Fallback if intent still unknown
+                        intent = "general_qa" 
 
                  elif isinstance(final_message, ToolMessage):
                       print(f"Warning: Graph ended with a ToolMessage: Name='{final_message.name}', Content='{final_message.content[:100]}...'")
-                      # Try to find the preceding AIMessage for context
                       response_content = f"Tool Execution Result: {final_message.content}" # Fallback
                       for msg in reversed(final_state['messages'][:-1]):
                           if isinstance(msg, AIMessage) and msg.content:
                               print(f"Returning content from previous AIMessage: {msg.content}")
                               response_content = msg.content + f"\n\n[Tool Execution Result: {final_message.content}]"
                               break
-                      # Intent should have been set before the tool call
+                      # Intent should have been set before the tool call, keep it.
+                      if intent == "error": intent = "tool_result" # Set specific intent if unknown
 
                  elif isinstance(final_message, HumanMessage):
                      print("Warning: Graph ended with a HumanMessage. This is unexpected.")
@@ -388,7 +501,6 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
                      intent = "error"
             else:
                  print("Error: Graph execution finished with an empty or invalid final state.")
-                 # response_content already defaulted
                  intent = "error"
 
         except Exception as e:

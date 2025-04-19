@@ -156,9 +156,10 @@ class KayakFlightCrawler:
             try:
                 logging.info("Attempting to close popup by clicking element with class 'nrc6-inner'...")
                 # Find the element globally
-                close_target_element = self.detail_wait.until(
-                    EC.element_to_be_clickable((By.CLASS_NAME, 'nrc6-inner'))
-                )
+                close_target_element = flight_element.find_element(By.CLASS_NAME, 'nrc6-inner')
+                # self.detail_wait.until(
+                #     EC.element_to_be_clickable((By.CLASS_NAME, 'nrc6-inner'))
+                # )
                 # Scroll into view just in case, though overlays are often not scroll-dependent
                 # self.driver.execute_script("arguments[0].scrollIntoViewIfNeeded(true);", close_target_element)
                 # time.sleep(0.2)
@@ -402,15 +403,43 @@ class KayakFlightCrawler:
             self.save_results(output_filename) # Final save for this run
 
     def save_results(self, filename):
-        """Saves the currently scraped data to the specified JSON file."""
+        """Saves the currently scraped data after deduplication to the specified JSON file."""
+        
+        # --- Deduplication Logic --- 
+        unique_flights = {}
+        seen_keys = set()
+        deduplicated_list = []
+
+        logging.info(f"Starting deduplication of {len(self.scraped_flights)} scraped flights...")
+
+        for flight in self.scraped_flights:
+            # Create a unique key based on core flight details
+            # Handle potential N/A values
+            key = (
+                flight.get('flight_id', 'N/A'),
+                flight.get('departure_time', 'N/A'),
+                flight.get('arrival_time', 'N/A'),
+                flight.get('departure_airport', 'N/A'),
+                flight.get('arrival_airport', 'N/A')
+            )
+            
+            # Keep the first occurrence of each unique key
+            if key not in seen_keys:
+                seen_keys.add(key)
+                deduplicated_list.append(flight)
+            else:
+                 logging.info(f"Duplicate detected and skipped: {key}") # Optional: log skipped duplicates
+        
+        logging.info(f"Finished deduplication. Unique flights: {len(deduplicated_list)}")
+        # ---------------------------
+
         try:
             with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(self.scraped_flights, f, ensure_ascii=False, indent=2)
-            logging.info(f"Saved {len(self.scraped_flights)} flights to {filename}")
+                # Save the deduplicated list
+                json.dump(deduplicated_list, f, ensure_ascii=False, indent=2) 
+            logging.info(f"Saved {len(deduplicated_list)} unique flights to {filename}")
         except IOError as e:
             logging.error(f"Error saving data to {filename}: {e}")
-        except Exception as e:
-            logging.error(f"An unexpected error occurred during saving to {filename}: {e}")
 
     def close_driver(self):
         """Closes the WebDriver."""

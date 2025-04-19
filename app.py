@@ -66,11 +66,15 @@ def handle_travel_chat():
         return jsonify({"error": "Invalid JSON payload"}), 400
 
     query = data.get('question')
+    thread_id = data.get('thread_id') # Get thread_id from request
+
+    # Validate that both question and thread_id are present
     if not query:
         return jsonify({"error": "Missing 'question' in request"}), 400
+    if not thread_id:
+        return jsonify({"error": "Missing 'thread_id' in request"}), 400
 
-    thread_id = data.get('thread_id', "123534") # Consider generating a UUID if none provided
-    print(f"[/api/travel] {'New' if not data.get('thread_id') else 'Continuing'} conversation with thread_id: {thread_id}")
+    print(f"[/api/travel] Continuing conversation with thread_id: {thread_id}")
 
     # Call the agent which now returns a dictionary
     agent_result = travel_planner_instance.run_conversation(query)
