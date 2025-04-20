@@ -76,8 +76,11 @@ def handle_travel_chat():
 
     print(f"[/api/travel] Continuing conversation with thread_id: {thread_id}")
 
-    # Call the agent which now returns a dictionary
-    agent_result = travel_planner_instance.run_conversation(query)
+    # Call the agent, passing the thread_id
+    agent_result = travel_planner_instance.run_conversation(query, thread_id=thread_id)
+
+    # Use the thread_id returned by the agent for consistency in the response
+    returned_thread_id = agent_result.get("thread_id", thread_id) 
     response_content = agent_result.get("response", "Error: No response content found.")
     intent = agent_result.get("intent", "unknown") # Get the intent
 
@@ -86,10 +89,10 @@ def handle_travel_chat():
     # Check for errors based on intent or response content
     if intent == "error" or str(response_content).startswith(("Error:", "An error occurred:")):
          # Use the response_content which might contain a specific error message
-        return jsonify({"error": response_content, "intent": "error", "thread_id": thread_id}), 500
+        return jsonify({"error": response_content, "intent": "error", "thread_id": returned_thread_id}), 500
 
-    # Return the successful response including the intent
-    return jsonify({"response": response_content, "intent": intent, "thread_id": thread_id})
+    # Return the successful response including the intent and returned thread_id
+    return jsonify({"response": response_content, "intent": intent, "thread_id": returned_thread_id})
 
 # --- Health Check Endpoint (Optional but Recommended) ---
 @app.route('/health', methods=['GET'])

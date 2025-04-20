@@ -125,11 +125,9 @@ Respond only with the category name.""")
         try:
             print(f"Full message 123123: {state['messages']}")
             response = self.router_llm.invoke([routing_prompt, user_message])
-            query_type = response.content.strip().lower()
+            # Strip whitespace, lowercase, AND strip potential quotes
+            query_type = response.content.strip().lower().strip('\'"') 
             print(f"Initial routing for query '{user_message.content[:50]}...': {query_type}")
-            if query_type not in ["persona", "history", "content"]:
-                print(f"Warning: Initial routing returned unexpected value: {query_type}. Defaulting to 'content'.")
-                query_type = "content"
         except Exception as e:
              print(f"Error during initial routing: {e}")
              traceback.print_exc()
@@ -138,14 +136,24 @@ Respond only with the category name.""")
         return {"query_type": query_type, "relevance_decision": None, "intent": None}
 
     def route_based_on_query_type(self, state: AgentState):
-        """Routes based on the query type."""
+        """Validates query_type in state and RETURNS the routing decision string."""
         query_type = state.get("query_type")
+        # print(f"--- route_based_on_query_type (validation) --- State received: {state}") # Keep logging if needed
+        validated_query_type = "content" # Default
         if query_type:
-             print(f"Routing based on query type: {query_type}")
-             return query_type
+             # print(f"Query type from initial_router: {query_type}") # Keep logging if needed
+             if query_type in ["persona", "history", "content"]:
+                 validated_query_type = query_type
+             else:
+                 print(f"Warning: Unexpected query_type '{query_type}' found in route_based_on_query_type. Defaulting to 'content'.")
         else:
              print("Warning: Query type not found in state. Defaulting to 'content'.")
-             return "content"
+        
+        # Return the validated string directly for routing
+        print(f"--- route_based_on_query_type --- Returning decision: {validated_query_type}")
+        return validated_query_type 
+        # Old version that just updated state:
+        # return {"query_type": validated_query_type}
 
     def direct_llm_answer(self, state: AgentState):
         """Answers persona or history questions directly using the main LLM (without tools bound initially)."""
@@ -424,10 +432,8 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
         print("Query marked as not related to Da Nang travel.")
         return {"messages": [AIMessage(content="I apologize, but I specialize only in travel related to Da Nang, Vietnam, including planning trips there and checking flights from major Vietnamese cities. I cannot answer questions outside this scope.")]}
 
-    def run_conversation(self, query: str):
+    def run_conversation(self, query: str, thread_id: str | None = None):
         messages = [HumanMessage(content=query)]
-        import uuid
-        thread_id = str(uuid.uuid4())
         thread = {"configurable": {"thread_id": thread_id}}
 
         print(f"\n--- Running conversation for thread {thread_id} ---")
@@ -442,15 +448,37 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
 
             # Determine intent from final state if available (might be set even if final_response_data is used)
             if final_state:
-                intent = final_state.get("intent", intent)
-                if intent == 'book_flights' and final_state.get("final_response_data") is not None:
-                    # If book_flights intent led to direct data, ensure intent is set correctly
-                    intent = "book_flights"
-                elif final_state.get("query_type") in ["persona", "history"] and intent == "error": # Use error as default check
+                final_query_type = final_state.get("query_type")
+                final_relevance = final_state.get("relevance_decision")
+                final_intent_field = final_state.get("intent") # Get intent potentially set by intent_router
+                final_response_data = final_state.get("final_response_data")
+
+                # Prioritize direct answer path
+                if final_query_type in ["persona", "history"]:
                     intent = "direct_answer"
-                elif final_state.get("relevance_decision") == "end" and intent == "error":
+                # Prioritize book_flights success
+                elif final_response_data is not None:
+                    intent = "book_flights"
+                # Prioritize not related
+                elif final_relevance == "end":
                      intent = "not_related"
-                     
+                # Use intent set by intent_router if valid
+                elif final_intent_field in ["plan_trip", "book_flights", "search_info", "general_qa"]:
+                     intent = final_intent_field
+                # Fallback based on final message content if intent is still unknown (e.g., error occurred)
+                else:
+                    # Keep the original fallback logic based on final message
+                    if final_state and 'messages' in final_state and final_state['messages']:
+                        final_message = final_state['messages'][-1]
+                        if isinstance(final_message, AIMessage):
+                             if "I apologize, but I specialize only in travel related to Da Nang" in final_message.content:
+                                 intent = "not_related"
+                             else:
+                                 intent = "general_qa" # Default for other AIMessages
+                        # ... (keep other message type fallbacks if needed) ...
+                    else:
+                         intent = "error" # If state is invalid
+
             # --- Check for final_response_data first --- 
             if final_state and final_state.get("final_response_data") is not None:
                  response_content = final_state["final_response_data"]
