@@ -11,6 +11,7 @@ from agents.tools import plan_da_nang_trip_tool, book_flights_tool
 import sqlite3
 import json
 import logging
+from .history_manager import summarize_conversation_history, prune_conversation_history
 
 load_dotenv()
 
@@ -81,10 +82,10 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
             "intent_router",
             self.route_based_on_intent,
             {
-                "plan_trip": "call_llm_with_tools",
-                "book_flights": "call_llm_with_tools",
-                "search_info": "call_llm_with_tools",
-                "general_qa": "call_llm_with_tools",
+                "plan_agent": "call_llm_with_tools",
+                "flight_agent": "call_llm_with_tools",
+                "information_agent": "call_llm_with_tools",
+                "general_qa_agent": "call_llm_with_tools",
                 "error": END
             }
         )
@@ -123,7 +124,7 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
 Respond only with the category name.""")
 
         try:
-            print(f"Full message 123123: {state['messages']}")
+            # print(f"Full message 123123: {state['messages']}")
             response = self.router_llm.invoke([routing_prompt, user_message])
             # Strip whitespace, lowercase, AND strip potential quotes
             query_type = response.content.strip().lower().strip('\'"') 
@@ -158,10 +159,18 @@ Respond only with the category name.""")
     def direct_llm_answer(self, state: AgentState):
         """Answers persona or history questions directly using the main LLM (without tools bound initially)."""
         messages = state['messages']
+
+        # <<< APPLY HISTORY MANAGEMENT HERE TOO >>>
+        # Option 1: Summarization
+        messages = summarize_conversation_history(messages, self.llm) # Pass the appropriate LLM instance
+        # Option 2: Pruning
+        # messages = prune_conversation_history(messages)
+
+        # Ensure system prompt if needed (your existing logic)
         if not any(isinstance(m, SystemMessage) for m in messages):
              messages = [SystemMessage(content=self.system)] + messages
 
-        message = self.llm.invoke(messages)
+        message = self.model.invoke(messages)
         return {'messages': [message]}
 
     def check_relevance(self, state: AgentState):
@@ -208,20 +217,20 @@ Respond only with the word 'end' if it IS NOT related.""")
             return {"intent": "error"}
 
         intent_prompt = SystemMessage(content="""Given the user query (which is relevant to Da Nang travel), classify the primary intent:
-- 'plan_trip': User wants a travel plan/itinerary for Da Nang (e.g., 'plan a 3 day trip to Da Nang', 'make an itinerary').
-- 'book_flights': User is asking about flights, potentially to or from Da Nang (e.g., 'flights from Hanoi?', 'show flights on April 19th', 'book a flight from Saigon?').
-- 'search_info': User is asking a question likely requiring external, up-to-date information about Da Nang (weather, opening hours, specific events, prices) that isn't about flights or planning.
-- 'general_qa': User is asking a general question about Da Nang that might be answerable from general knowledge or conversation history, without needing specific tools.
-Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""")
+- 'plan_agent': User wants a travel plan/itinerary for Da Nang (e.g., 'plan a 3 day trip to Da Nang', 'make an itinerary').
+- 'flight_agent': User is asking about flights, potentially to or from Da Nang (e.g., 'flights from Hanoi?', 'show flights on April 19th', 'book a flight from Saigon?').
+- 'information_agent': User is asking a question likely requiring external, up-to-date information about Da Nang (weather, opening hours, specific events, prices) that isn't about flights or planning.
+- 'general_qa_agent': User is asking a general question about Da Nang that might be answerable from general knowledge or conversation history, without needing specific tools.
+Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general_qa_agent'.""")
 
         try:
             response = self.router_llm.invoke([intent_prompt, user_message])
             intent = response.content.strip().lower()
             print(f"Intent routing for query '{user_message.content[:50]}...': {intent}")
-            valid_intents = ["plan_trip", "book_flights", "search_info", "general_qa"]
+            valid_intents = ["plan_agent", "flight_agent", "information_agent", "general_qa_agent"]
             if intent not in valid_intents:
-                print(f"Warning: Intent routing returned unexpected value: {intent}. Defaulting to 'general_qa'.")
-                intent = "general_qa"
+                print(f"Warning: Intent routing returned unexpected value: {intent}. Defaulting to 'general_qa_agent'.")
+                intent = "general_qa_agent"
         except Exception as e:
              print(f"Error during intent routing: {e}")
              traceback.print_exc()
@@ -234,7 +243,7 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
         intent = state.get("intent")
         print(f"Routing based on intent: {intent}")
         if intent:
-            if intent in ["plan_trip", "book_flights", "search_info", "general_qa"]:
+            if intent in ["plan_agent", "flight_agent", "information_agent", "general_qa_agent"]:
                 return intent
             else:
                 print(f"Warning: Invalid intent '{intent}' found in state. Defaulting to error.")
@@ -247,8 +256,15 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
         """Calls the main LLM bound with all relevant tools."""
         print("--- Calling LLM with Tools ---")
         messages = state['messages']
+
+        # <<< APPLY HISTORY MANAGEMENT HERE >>>
+        # Option 1: Summarization
+        messages = summarize_conversation_history(messages, self.llm) # Pass the appropriate LLM instance
+        # Option 2: Pruning
+        # messages = prune_conversation_history(messages)
+
         if not any(isinstance(m, SystemMessage) for m in messages):
-             messages = [SystemMessage(content=self.system)] + messages
+            messages = [SystemMessage(content=self.system)] + messages
 
         print("Messages being sent to LLM:")
         for msg in messages:
@@ -260,7 +276,7 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
             else:
                  print(f"    Content: {str(msg.content)[:100]}...")
 
-        print(f"Calling model with messages: {[m.type for m in messages]}")
+        print(f"Calling model with potentially modified messages: {[m.type for m in messages]}")
         message = self.model.invoke(messages)
         print(f"LLM response type: {message.type}")
         if hasattr(message, 'tool_calls') and message.tool_calls:
@@ -458,12 +474,12 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
                     intent = "direct_answer"
                 # Prioritize book_flights success
                 elif final_response_data is not None:
-                    intent = "book_flights"
+                    intent = "flight_agent"
                 # Prioritize not related
                 elif final_relevance == "end":
                      intent = "not_related"
                 # Use intent set by intent_router if valid
-                elif final_intent_field in ["plan_trip", "book_flights", "search_info", "general_qa"]:
+                elif final_intent_field in ["plan_agent", "flight_agent", "information_agent", "general_qa_agent"]:
                      intent = final_intent_field
                 # Fallback based on final message content if intent is still unknown (e.g., error occurred)
                 else:
@@ -474,7 +490,7 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
                              if "I apologize, but I specialize only in travel related to Da Nang" in final_message.content:
                                  intent = "not_related"
                              else:
-                                 intent = "general_qa" # Default for other AIMessages
+                                 intent = "general_qa_agent" # Default for other AIMessages
                         # ... (keep other message type fallbacks if needed) ...
                     else:
                          intent = "error" # If state is invalid
@@ -484,9 +500,9 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
                  response_content = final_state["final_response_data"]
                  print(f"Graph finished. Using final_response_data (Type: {type(response_content)}). Intent: {intent}")
                  # Ensure intent is correctly set for this case
-                 if intent != "book_flights":
-                     logging.warning(f"final_response_data was set, but intent is '{intent}'. Forcing to 'book_flights'.")
-                     intent = "book_flights"
+                 if intent != "flight_agent":
+                     logging.warning(f"final_response_data was set, but intent is '{intent}'. Forcing to 'flight_agent'.")
+                     intent = "flight_agent"
             
             # --- Otherwise, process final message as before --- 
             elif final_state and 'messages' in final_state and final_state['messages']:
@@ -502,11 +518,11 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
                      if intent == "error" and "I apologize, but I specialize only in travel related to Da Nang" in response_content:
                          intent = "not_related"
                      # Explicitly set intent if LLM answers directly without tool use after intent routing
-                     elif intent in ["plan_trip", "book_flights", "search_info", "general_qa"] and not hasattr(final_message, 'tool_calls'):
+                     elif intent in ["plan_agent", "flight_agent", "information_agent", "general_qa_agent"] and not hasattr(final_message, 'tool_calls'):
                          print(f"LLM answered directly after intent routing ({intent}). Setting final intent.")
                          pass # Intent should already be correctly set from routing
                      elif intent == "error": # Fallback if intent still unknown
-                        intent = "general_qa" 
+                        intent = "general_qa_agent" 
 
                  elif isinstance(final_message, ToolMessage):
                       print(f"Warning: Graph ended with a ToolMessage: Name='{final_message.name}', Content='{final_message.content[:100]}...'")
@@ -538,10 +554,10 @@ Respond only with 'plan_trip', 'book_flights', 'search_info', or 'general_qa'.""
              intent = "error" # Ensure intent is 'error' on exception
 
         # Ensure intent is one of the expected values or a status
-        valid_intents = ["plan_trip", "book_flights", "search_info", "general_qa", "direct_answer", "not_related", "error"]
+        valid_intents = ["plan_agent", "flight_agent", "information_agent", "general_qa_agent", "direct_answer", "not_related", "error"]
         if intent not in valid_intents:
-             print(f"Warning: Final intent '{intent}' is not in the expected list. Setting to 'general_qa'.")
-             intent = "general_qa" # Fallback to a sensible default if something unexpected happened
+             print(f"Warning: Final intent '{intent}' is not in the expected list. Setting to 'general_qa_agent'.")
+             intent = "general_qa_agent" # Fallback to a sensible default if something unexpected happened
 
         print(f"--- Returning response with intent: {intent} ---")
         return {"response": response_content, "intent": intent}

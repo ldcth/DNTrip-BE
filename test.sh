@@ -10,7 +10,7 @@
 # curl -X POST http://localhost:3001/api/travel -H "Content-Type: application/json" -d '{"question": "Show me flight from Hanoi on 19/04/2025?"}'
 # curl -X POST http://localhost:3001/api/travel -H "Content-Type: application/json" -d '{"question": "Show me flight from Hanoi on 21/04/2025?"}'
 
-curl -X POST http://localhost:3001/api/travel -H "Content-Type: application/json" -d '{"question": "My name is John Doe", "thread_id": "wee"}'
+curl -X POST http://localhost:3001/api/travel -H "Content-Type: application/json" -d '{"question": "My name is John Doe", "thread_id": "axx1x"}'
 
-curl -X POST http://localhost:3001/api/travel -H "Content-Type: application/json" -d '{"question": "What is my name?", "thread_id": "wee"}'
+curl -X POST http://localhost:3001/api/travel -H "Content-Type: application/json" -d '{"question": "What is my name?", "thread_id": "axx1x"}'
 
