@@ -12,6 +12,7 @@ import re
 import os
 import logging
 from datetime import date, timedelta
+from pymongo import MongoClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -24,10 +25,17 @@ class KayakFlightCrawler:
         self.detail_wait = WebDriverWait(self.driver, 20) # Wait time for detail popup
         self.output_dir = output_dir
         self.scraped_flights = [] # Holds flights for the current run
+        self.all_scraped_flights = [] # Holds flights from ALL runs
+        self.db = self._get_mongodb_client()
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
             logging.info(f"Created output directory: {self.output_dir}")
 
+    def _get_mongodb_client(self):
+        client = MongoClient(os.getenv('MONGODB_URI'))
+        db = client["dntrip"]
+        return db["flight_data"]
+    
     def _get_dates(self):
         """Gets tomorrow's and the day after tomorrow's date."""
         today = date.today()
@@ -54,18 +62,6 @@ class KayakFlightCrawler:
             flight_data['price'] = price_element.text.strip()
             logging.info(f"Found price: {flight_data['price']}")
 
-            # --- Click for Details --- 
-            # NOTE: Click is now performed *outside* this function before calling it.
-            # Use flight_element directly as the trigger for closing later
-            # details_trigger = flight_element # RENAMED for consistency, but it's the flight_element itself
-            
-            # # Scroll into view before clicking - REMOVED (done outside)
-            # self.driver.execute_script("arguments[0].scrollIntoViewIfNeeded(true);", details_trigger) 
-            # time.sleep(0.5) # Brief pause after scroll - REMOVED (done outside)
-            # details_trigger.click() # Click the element itself - REMOVED (done outside)
-            # logging.info("Clicked flight element to open details popup.")
-            # time.sleep(3) # Allow time for popup transition and loading - REMOVED (done outside, but maybe keep wait?)
-            # Adding a small wait here just in case, though the main wait is outside now
             time.sleep(1)
 
             # --- Wait for Popup and Extract Details ---
@@ -107,7 +103,7 @@ class KayakFlightCrawler:
                 flight_data['flight_time'] = "N/A"
             
             # Departure/Arrival Blocks (using class g16k)
-            flight_data['departure_airport'] = "N/A"
+            flight_data['departure_airport'] = "N/A" 
             flight_data['departure_time'] = "N/A"
             flight_data['arrival_airport'] = "N/A"
             flight_data['arrival_time'] = "N/A"
@@ -157,12 +153,7 @@ class KayakFlightCrawler:
                 logging.info("Attempting to close popup by clicking element with class 'nrc6-inner'...")
                 # Find the element globally
                 close_target_element = flight_element.find_element(By.CLASS_NAME, 'nrc6-inner')
-                # self.detail_wait.until(
-                #     EC.element_to_be_clickable((By.CLASS_NAME, 'nrc6-inner'))
-                # )
-                # Scroll into view just in case, though overlays are often not scroll-dependent
-                # self.driver.execute_script("arguments[0].scrollIntoViewIfNeeded(true);", close_target_element)
-                # time.sleep(0.2)
+
                 close_target_element.click()
                 logging.info("Clicked element with class 'nrc6-inner'.")
                 time.sleep(1) # Allow time for potential close action
@@ -172,25 +163,6 @@ class KayakFlightCrawler:
                 logging.error("Could not find element with class 'nrc6-inner' to click.")
             except Exception as close_click_err:
                 logging.error(f"Error clicking element with class 'nrc6-inner': {close_click_err}")
-
-            # --- Explicitly Wait for Popup to Disappear --- 
-            # try:
-            #     logging.info("Waiting for popup container to become invisible...")
-            #     popup_invisible = self.detail_wait.until(
-            #         EC.invisibility_of_element_located((By.XPATH, popup_container_xpath))
-            #     )
-            #     if popup_invisible:
-            #         logging.info("Popup container successfully closed.")
-            #     else:
-            #         # This case might not be reachable if invisibility_of_element_located waits correctly
-            #         logging.warning("Popup container did not become invisible within timeout (unexpected state).")
-            # except TimeoutException:
-            #     logging.error("Popup did NOT close after all attempts within the timeout period.")
-            #     # Decide how to handle this - maybe return None to indicate failure?
-            #     # For now, we'll log the error and the function will continue, 
-            #     # potentially leading to issues on the next iteration. 
-            #     # Consider returning None here if the popup MUST be closed.
-            #     # return None # <--- Uncomment this to treat failure to close as a data scraping failure
 
         except (NoSuchElementException, TimeoutException, StaleElementReferenceException) as e:
             logging.error(f"Error processing flight element or its details: {e}")
@@ -232,34 +204,17 @@ class KayakFlightCrawler:
                  os.remove(output_filename)
              except OSError as e:
                  logging.error(f"Could not remove existing file {output_filename}: {e}")
-                 # Decide if you want to stop or continue
                  return # Stop if file can't be removed
 
         # Initialize the file with an empty list
-        self.save_results(output_filename)
+        self._save_to_json(output_filename, [])
 
 
         logging.info(f"Navigating to: {search_url}")
         self.driver.get(search_url)
-
+        time.sleep(10)
         try:
             # --- Handle Potential Overlays (Cookies, etc.) ---
-            time.sleep(1) # Initial wait for page load and potential overlays
-            # try:
-            #     # Example: Check for a common cookie consent button text/ID
-            #     cookie_button_xpath = "//button[contains(translate(text(), 'ACCEPT', 'accept'), 'accept') or contains(@id,'accept')]"
-            #     cookie_button = WebDriverWait(self.driver, 10).until(
-            #         EC.element_to_be_clickable((By.XPATH, cookie_button_xpath))
-            #     )
-            #     logging.info("Found cookie consent button, clicking it.")
-            #     cookie_button.click()
-            #     time.sleep(2) # Wait after click
-            # except TimeoutException:
-            #     logging.info("No cookie consent button found or it timed out.")
-            # except Exception as e:
-            #     logging.warning(f"Error clicking cookie button: {e}")
-
-
             # --- Wait for Flight Results ---
             # Use class name Fxw9 for the results container
             results_container_xpath = "//div[contains(@class, 'Fxw9')]" # Find div containing class Fxw9
@@ -344,11 +299,15 @@ class KayakFlightCrawler:
 
 
                             if flight_details:
+                                # Add database-specific keys
+                                flight_details['departure_airport_code'] = departure 
+                                flight_details['arrival_airport_code'] = arrival
+                                flight_details['search_date'] = date_str
+                                
                                 self.scraped_flights.append(flight_details)
                                 processed_flight_ids.add(flight_id) # Mark as processed
                                 new_flights_found_in_pass = True
                                 logging.info(f"Successfully added flight. Total: {len(self.scraped_flights)}")
-                                self.save_results(output_filename) # Save incrementally
 
                                 if len(self.scraped_flights) >= target_count:
                                     logging.info(f"Reached target count of {target_count}.")
@@ -400,46 +359,66 @@ class KayakFlightCrawler:
         finally:
             logging.info(f"Finished scraping for {departure} to {arrival} on {date_str}.")
             logging.info(f"Total flights scraped for this run: {len(self.scraped_flights)}")
-            self.save_results(output_filename) # Final save for this run
-
-    def save_results(self, filename):
-        """Saves the currently scraped data after deduplication to the specified JSON file."""
-        
-        # --- Deduplication Logic --- 
-        unique_flights = {}
-        seen_keys = set()
-        deduplicated_list = []
-
-        logging.info(f"Starting deduplication of {len(self.scraped_flights)} scraped flights...")
-
-        for flight in self.scraped_flights:
-            # Create a unique key based on core flight details
-            # Handle potential N/A values
-            key = (
-                flight.get('flight_id', 'N/A'),
-                flight.get('departure_time', 'N/A'),
-                flight.get('arrival_time', 'N/A'),
-                flight.get('departure_airport', 'N/A'),
-                flight.get('arrival_airport', 'N/A')
-            )
             
-            # Keep the first occurrence of each unique key
-            if key not in seen_keys:
-                seen_keys.add(key)
-                deduplicated_list.append(flight)
-            else:
-                 logging.info(f"Duplicate detected and skipped: {key}") # Optional: log skipped duplicates
-        
-        logging.info(f"Finished deduplication. Unique flights: {len(deduplicated_list)}")
-        # ---------------------------
+            # --- Deduplication Logic ---
+            seen_keys = set()
+            deduplicated_list = []
+            logging.info(f"Starting deduplication of {len(self.scraped_flights)} scraped flights...")
+            for flight in self.scraped_flights:
+                # Use a key sensitive to specific flight details to identify duplicates
+                key = (
+                    flight.get('flight_id', 'N/A'),
+                    flight.get('departure_time', 'N/A'),
+                    flight.get('arrival_time', 'N/A'),
+                    flight.get('departure_airport', 'N/A'), # Use original key for deduplication
+                    flight.get('arrival_airport', 'N/A'),   # Use original key for deduplication
+                    flight.get('price', 'N/A'), # Consider adding price to key? Maybe not, as it can fluctuate
+                    flight.get('search_date', date_str) # Include search date for context
+                )
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    deduplicated_list.append(flight)
+                else:
+                    logging.debug(f"Duplicate detected and skipped: {key}") # Log duplicates at debug level
+            logging.info(f"Finished deduplication. Unique flights: {len(deduplicated_list)}")
+            
+            # --- Accumulate results for final DB insertion --- 
+            self.all_scraped_flights.extend(deduplicated_list)
+            logging.info(f"Added {len(deduplicated_list)} unique flights to the main accumulator. Total accumulated: {len(self.all_scraped_flights)}")
 
+            # --- Save to JSON (Keep this per-run) ---
+            self._save_to_json(output_filename, deduplicated_list) # Call renamed method with deduplicated data
+
+    def _save_to_json(self, filename, data_list):
+        """Saves the provided data list to the specified JSON file."""
+        # This method now accepts the data list directly
         try:
             with open(filename, 'w', encoding='utf-8') as f:
-                # Save the deduplicated list
-                json.dump(deduplicated_list, f, ensure_ascii=False, indent=2) 
-            logging.info(f"Saved {len(deduplicated_list)} unique flights to {filename}")
+                json.dump(data_list, f, ensure_ascii=False, indent=2)
+            logging.info(f"Saved {len(data_list)} unique flights to {filename}")
         except IOError as e:
             logging.error(f"Error saving data to {filename}: {e}")
+
+    def _update_database(self, all_flights):
+        """Deletes all existing data and inserts the provided list of flights into MongoDB."""
+        if not all_flights:
+            logging.warning("No flights were accumulated, skipping database update.")
+            return
+
+        logging.info(f"\n{'='*30}\nAttempting final database update with {len(all_flights)} accumulated flights...\n{'='*30}")
+        try:
+            # 1. Delete ALL existing data in the collection
+            logging.info(f"Deleting ALL existing documents from collection: {self.db.name}...")
+            delete_result = self.db.delete_many({})
+            logging.info(f"Deleted {delete_result.deleted_count} documents.")
+
+            # 2. Insert all accumulated data
+            logging.info(f"Inserting {len(all_flights)} new documents...")
+            insert_result = self.db.insert_many(all_flights)
+            logging.info(f"Successfully inserted {len(insert_result.inserted_ids)} documents into MongoDB.")
+
+        except Exception as db_final_err:
+            logging.error(f"CRITICAL ERROR during final database update: {db_final_err}", exc_info=True)
 
     def close_driver(self):
         """Closes the WebDriver."""
@@ -450,6 +429,8 @@ class KayakFlightCrawler:
 
 if __name__ == "__main__":
     DEPARTURE_AIRPORTS = ["HAN", "SGN"]
+    # DEPARTURE_AIRPORTS = ["HAN"]
+
     ARRIVAL_AIRPORT = "DAD"
     TARGET_FLIGHT_COUNT_PER_RUN = 20 # Adjust as needed
 
@@ -472,5 +453,10 @@ Starting scrape for: {departure} -> {ARRIVAL_AIRPORT} on {date_str}
     except Exception as e:
         logging.critical(f"An error occurred in the main execution block: {e}", exc_info=True)
     finally:
+        # --- Final Database Update --- 
+        # Call the dedicated method to handle DB update
+        crawler._update_database(crawler.all_scraped_flights)
+        
+        # --- Close Driver --- 
         crawler.close_driver()
         logging.info("Scraping process finished.")

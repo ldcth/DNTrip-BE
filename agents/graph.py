@@ -23,16 +23,11 @@ class Agent:
         self.system =  """You are a smart research assistant specialized in Da Nang travel.
 Use the search engine ('tavily_search_results_json') to look up specific, current information relevant to Da Nang travel (e.g., weather, specific opening hours, event details) ONLY IF the user asks for general information that isn't about flights or planning.
 If the user asks for a travel plan and specifies a duration (e.g., 'plan a 3 days 2 nights trip', 'make a plan for 1 week'), use the 'plan_da_nang_trip' tool. Extract the travel duration accurately.
-If the user asks about flights (e.g., 'show me flights from Hanoi', 'find flights to Da Nang on April 19th', 'book flight from SGN'), use the 'book_flights' tool. Extract the origin city and date accurately. You ONLY have flight data for Hanoi (HAN) and Ho Chi Minh City (SGN) departing on 2025-04-21 and 2025-04-20. Politely inform the user if they ask for other origins or dates using this tool.
+If the user asks about flights (e.g., 'show me flights from Hanoi', 'find flights to Da Nang on date', 'book flight from SGN'), use the 'book_flights' tool. Extract the origin city and date accurately. You ONLY have flight data for Hanoi (HAN) and Ho Chi Minh City (SGN) departing on tomorrow and the day after tomorrow. Politely inform the user if they ask for other origins or dates using this tool.
 Answer questions ONLY if they are related to travel in Da Nang, Vietnam, including flights *originating* from other Vietnamese cities TO Da Nang (if data exists).
 If a query is relevant but doesn't require planning, flight booking, or external web search, answer directly from your knowledge.
 If a query is irrelevant (not about Da Nang travel, flights to/from relevant locations, or planning), politely decline.
 
-**IMPORTANT:** When presenting flight results from the 'book_flights' tool:
-- List each flight option returned by the tool.
-- For each flight, include ALL these details EXACTLY as provided by the tool: flight ID (e.g., Vietnam Airlines 148), departure time, arrival time, flight duration, price, departure airport, and arrival airport.
-- Do NOT summarize, omit fields, or combine entries.
-- If the tool returns an error message instead of flights, relay that error message to the user.
 """
         self.llm = ChatOpenAI(
                 model="gpt-4o-mini",
@@ -218,7 +213,7 @@ Respond only with the word 'end' if it IS NOT related.""")
 
         intent_prompt = SystemMessage(content="""Given the user query (which is relevant to Da Nang travel), classify the primary intent:
 - 'plan_agent': User wants a travel plan/itinerary for Da Nang (e.g., 'plan a 3 day trip to Da Nang', 'make an itinerary').
-- 'flight_agent': User is asking about flights, potentially to or from Da Nang (e.g., 'flights from Hanoi?', 'show flights on April 19th', 'book a flight from Saigon?').
+- 'flight_agent': User is asking about flights, potentially to or from Da Nang (e.g., 'flights from Hanoi?', 'show flights on date', 'book a flight from Saigon?').
 - 'information_agent': User is asking a question likely requiring external, up-to-date information about Da Nang (weather, opening hours, specific events, prices) that isn't about flights or planning.
 - 'general_qa_agent': User is asking a general question about Da Nang that might be answerable from general knowledge or conversation history, without needing specific tools.
 Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general_qa_agent'.""")
@@ -317,8 +312,9 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
              return {'messages': [ToolMessage(tool_call_id="error", name="error", content="Internal error: Agent tried to take action without a valid tool call.")]}
 
         tool_calls = last_message.tool_calls
-        tool_messages_to_return = [] # Renamed from results
-        
+        tool_messages_to_return = [] 
+        final_data_to_return = None # To store flight data if successful
+
         for t in tool_calls:
             tool_call_id = t.get('id')
             if not tool_call_id:
@@ -331,7 +327,8 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
             print(f"Attempting to call tool: {tool_name} with args: {tool_args} (Call ID: {tool_call_id})")
             if tool_name in self.tools:
                 tool_to_use = self.tools[tool_name]
-                result_content_for_llm = "Error: Tool execution failed to produce content."
+                result_content_for_message = f"Error: Tool {tool_name} execution failed." # Default content
+
                 try:
                     # --- Execute the tool --- 
                     if isinstance(tool_args, dict):
@@ -365,47 +362,49 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
                             if flight_list is not None: 
                                 if flight_list: # List is not empty
                                     logging.info(f"Storing raw flight list ({len(flight_list)} items) in final_response_data.")
-                                    return {"final_response_data": flight_list} 
+                                    # *** STORE THE DATA ***
+                                    final_data_to_return = flight_list 
+                                    # *** CREATE A TOOL MESSAGE FOR HISTORY ***
+                                    result_content_for_message = f"Successfully retrieved {len(flight_list)} flights." 
                                 else: # List is empty
-                                    result_content_for_llm = "No flights found matching your criteria."
-                                    print("Flight tool returned empty list. Preparing message for LLM.")
+                                    result_content_for_message = "No flights found matching your criteria."
+                                    print("Flight tool returned empty list. Preparing message.")
                             
                             # If we didn't get a list, check for error/message dicts in the original parsed_data
                             elif isinstance(parsed_data, dict) and 'error' in parsed_data:
-                                result_content_for_llm = f"Error from flight tool: {parsed_data['error']}"
-                                print("Flight tool returned error dict. Preparing message for LLM.")
+                                result_content_for_message = f"Error from flight tool: {parsed_data['error']}"
+                                print("Flight tool returned error dict. Preparing message.")
                             elif isinstance(parsed_data, dict) and 'message' in parsed_data:
-                                 result_content_for_llm = parsed_data['message']
-                                 print("Flight tool returned message dict. Preparing message for LLM.")
+                                 result_content_for_message = parsed_data['message']
+                                 print("Flight tool returned message dict. Preparing message.")
                             
                             # Handle other unexpected formats
                             else:
-                                print(f"Warning: Unexpected data format from book_flights tool: {type(parsed_data)}. Content: {str(raw_result)[:200]}")
-                                result_content_for_llm = f"Received unexpected data format from the flight tool."
+                                result_content_for_message = f"Received unexpected data format from the flight tool."
 
                         # Handle JSON parsing errors
                         except json.JSONDecodeError:
                             print(f"Error: book_flights tool did not return valid JSON: {raw_result}")
-                            result_content_for_llm = f"Error: Flight tool returned invalid data."
+                            result_content_for_message = f"Error: Flight tool returned invalid data."
                         # Handle other processing errors
                         except Exception as format_err:
                              print(f"Error processing flight data: {format_err}")
-                             result_content_for_llm = f"Error processing flight results: {format_err}"
+                             result_content_for_message = f"Error processing flight results: {format_err}"
                         
-                        # If we reach here, it means we need to send a ToolMessage back to LLM
-                        tool_messages_to_return.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=result_content_for_llm))
+                        # *** ALWAYS Append the ToolMessage for book_flights ***
+                        tool_messages_to_return.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=result_content_for_message))
 
                     # For tools OTHER than book_flights
                     else: 
                         # Ensure result is a string for the ToolMessage
                         if not isinstance(raw_result, str):
                             print(f"Warning: Tool {tool_name} returned non-string result: {type(raw_result)}. Converting to string.")
-                            result_content_for_llm = str(raw_result)
+                            result_content_for_message = str(raw_result)
                         else:
-                             result_content_for_llm = raw_result
+                             result_content_for_message = raw_result
                         
                         # Append ToolMessage for other tools
-                        tool_messages_to_return.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=result_content_for_llm))
+                        tool_messages_to_return.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=result_content_for_message))
 
                 # Handle errors during tool invocation itself
                 except Exception as e:
@@ -420,19 +419,22 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
                  # Append error message for LLM
                  tool_messages_to_return.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=f"Error: Tool '{tool_name}' is not available."))
 
-        # --- Return accumulated ToolMessages (if any) --- 
-        # This part is reached only if final_response_data was NOT set and returned earlier
+        # --- Return accumulated ToolMessages AND potential final data --- 
         print("--- Action Node Completed --- ")
+        state_update = {}
         if tool_messages_to_return:
-            print(f"Returning {len(tool_messages_to_return)} ToolMessage(s) to LLM for processing.")
-            for msg in tool_messages_to_return:
-                 print(f"  Tool: {msg.name}, Content: {msg.content[:200]}...")
-            return {'messages': tool_messages_to_return} 
+            print(f"Adding {len(tool_messages_to_return)} ToolMessage(s) to state for history.")
+            state_update['messages'] = tool_messages_to_return
         else:
-             # This case should not happen if logic above is correct 
-             # (either final_response_data is returned, or a tool message is generated)
-             print("CRITICAL WARNING: take_action finished without setting final_response_data or preparing ToolMessages.")
-             return {"messages": [ToolMessage(tool_call_id="error", name="error", content="Internal error: Action node finished unexpectedly.")]}
+             # Should not happen if logic is correct
+             print("CRITICAL WARNING: take_action finished without preparing ToolMessages.")
+             state_update['messages'] = [ToolMessage(tool_call_id="error", name="error", content="Internal error: Action node finished unexpectedly.")]
+
+        if final_data_to_return is not None:
+            print("Adding final_response_data to state.")
+            state_update['final_response_data'] = final_data_to_return
+            
+        return state_update # Return dict containing messages and potentially final_response_data
 
     def route_after_action(self, state: AgentState):
         """Checks if final_response_data is set to decide the next step."""

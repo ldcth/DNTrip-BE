@@ -3,8 +3,17 @@ import os
 import re
 from datetime import datetime
 import traceback # Added for better error logging
+from pymongo.mongo_client import MongoClient
+import pymongo
+from dotenv import load_dotenv
+load_dotenv()
 
 FLIGHT_DATA_DIR = "../scrapper/data/flights" # Relative path from services directory
+
+def get_mongodb_client():
+    client = MongoClient(os.getenv('MONGODB_URI'))
+    db = client["dntrip"]
+    return db["flight_data"]
 
 # --- New Date Parsing Function ---
 def parse_date_string(date_str: str) -> str | None:
@@ -44,7 +53,99 @@ def parse_date_string(date_str: str) -> str | None:
     print(f"Warning: Could not parse date string '{date_str}' with known formats.")
     return None
 
-# --- Modified get_flights Function ---
+# --- Function to get flights from JSON (preserved) ---
+def _get_flights_from_json_file(origin_city: str, origin_code: str, date_iso: str) -> dict:
+    """
+    Gets flight information from a local JSON file.
+    (Original file-reading logic preserved here)
+    """
+    filename = f"{origin_code}_{date_iso}.json"
+    # Adjust path relative to *this* file's location
+    current_dir = os.path.dirname(__file__)
+    filepath = os.path.join(current_dir, FLIGHT_DATA_DIR, filename)
+    print(f"Looking for flight data file (JSON source): {filepath}")
+
+    if not os.path.exists(filepath):
+        return {"message": f"Sorry, I don't have flight data (from JSON file) for {origin_city} ({origin_code}) on {date_iso}."}
+
+    # 4. Load and return data
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f: # Added encoding
+            data = json.load(f)
+
+        if isinstance(data, list):
+            flights_to_show = data[:10]
+            # Add source identifier
+            return {"source": "json", "flights": flights_to_show}
+        elif isinstance(data, dict) and 'flights' in data and isinstance(data['flights'], list):
+             # Add source identifier
+             return {"source": "json", "flights": data['flights'][:10]}
+        else:
+            print(f"Warning: Unexpected data structure in {filename}.")
+            return {"error": "Could not process the JSON flight data file due to unexpected structure."}
+
+    except json.JSONDecodeError as e:
+        print(f"Error: Could not decode JSON from {filename}. Error: {e}")
+        return {"error": f"Error reading JSON flight data file {filename}. It might be corrupted."}
+    except Exception as e:
+        print(f"An unexpected error occurred while processing {filename} (JSON): {e}")
+        traceback.print_exc()
+        return {"error": "An internal error occurred while retrieving flight data from JSON."}
+
+# --- Function to get flights from MongoDB ---
+def get_flight_data_from_db(origin_code: str, date_iso: str) -> dict:
+    """
+    Gets flight data from MongoDB based on origin airport code and date.
+    """
+    collection = get_mongodb_client()
+    if collection is None:
+        return {"error": "Database connection failed. Cannot retrieve flight data."}
+
+    # Match the date format used in your DB (assuming it's YYYY-MM-DD)
+    # If your DB stores dates differently, adjust the query format here.
+    # Assuming 'departure_airport_code' and 'search_date' are the correct DB fields based on current code
+    query = {"departure_airport_code": origin_code, "search_date": date_iso}
+    # Corrected projection: Exclude _id and use rename syntax based on current query fields
+    projection = {
+        "_id": 0,                      # EXCLUDE _id for JSON compatibility
+        "price": "$price",              # Assumes DB field is 'price'
+        "date": "$date",                # Assumes DB field is 'date'
+        "flight_id": "$flight_id",      # Assumes DB field is 'flight_id'
+        "flight_time": "$flight_time",    # Assumes DB field is 'flight_time'
+        "departure_airport": "$departure_airport", # Assumes DB field is 'departure_airport'
+        "departure_time": "$departure_time", # Assumes DB field is 'departure_time'
+        "arrival_airport": "$arrival_airport",   # Assumes DB field is 'arrival_airport'
+        "arrival_time": "$arrival_time",     # Assumes DB field is 'arrival_time'
+        "departure_airport_code": "$departure_airport_code", # Keep as is
+        "arrival_airport_code": "$arrival_airport_code",   # Assumes DB field is 'arrival_airport_code'
+        "search_date": "$search_date"      # Keep as is
+    }
+
+    try:
+        print(f"Querying MongoDB: Collection='{collection.name}', Query={query}") # Removed projection from log for brevity
+        # Add limit to avoid fetching excessive data, adjust as needed
+        cursor = collection.find(query, projection).limit(20) # Limit query size
+        # CRITICAL FIX: Ensure cursor is consumed into a list *before* returning
+        flights = list(cursor) # Execute query and convert to list
+        print(f"Flights found: {len(flights)}") # Optional: Log how many flights were found
+
+        if not flights:
+            # More specific message
+            return {"message": f"No flights found in database matching origin '{origin_code}' and date '{date_iso}'."}
+        else:
+             # Limit to 10 flights for the final response if more were found
+             return {"source": "mongodb", "flights": flights[:10]}
+
+    except pymongo.errors.PyMongoError as e:
+        print(f"Error querying MongoDB: {e}")
+        traceback.print_exc()
+        return {"error": "An error occurred while querying the flight database."}
+    except Exception as e:
+        print(f"An unexpected error occurred during DB query: {e}")
+        traceback.print_exc()
+        return {"error": "An internal error occurred while retrieving flight data from DB."}
+
+# --- Modified get_flights Function (Now uses MongoDB primarily) ---
 def get_flights(origin_city: str, date_str: str) -> dict:
     """
     Gets flight information for a specific origin city and date.
@@ -62,6 +163,8 @@ def get_flights(origin_city: str, date_str: str) -> dict:
     # 1. Map origin city name to code
     origin_map = {
         "HANOI": "HAN",
+        "HCM": "SGN",
+        "HA NOI": "HAN",
         "HO CHI MINH CITY": "SGN",
         "SAIGON": "SGN",
         "DA NANG": "DAD"
@@ -84,49 +187,31 @@ def get_flights(origin_city: str, date_str: str) -> dict:
     if not date_iso:
         return {"error": f"Sorry, I couldn't understand the date '{date_str}'. Please use formats like DD/MM/YYYY, YYYY-MM-DD, or Month DD, YYYY."}
 
-    # 3. Construct filename and check existence
-    filename = f"{origin_code}_{date_iso}.json"
-    # Adjust path relative to *this* file's location
-    current_dir = os.path.dirname(__file__)
-    filepath = os.path.join(current_dir, FLIGHT_DATA_DIR, filename)
-    print(f"Looking for flight data file: {filepath}")
+    # 3. Fetch data from MongoDB
+    print(f"Attempting to fetch data from MongoDB for {origin_code} on {date_iso}")
+    db_result = get_flight_data_from_db(origin_code, date_iso)
+    # db_result = _get_flights_from_json_file(origin_city, origin_code, date_iso)
 
-    if not os.path.exists(filepath):
-        return {"message": f"Sorry, I don't have flight data for {origin_city} ({origin_code}) on {date_iso}."}
-
-    # 4. Load and return data
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f: # Added encoding
-            data = json.load(f)
-
-        if isinstance(data, list):
-            flights_to_show = data[:10]
-            # TODO: Future enhancement - filter by destination if destination info is available in query/data
-            return {"flights": flights_to_show}
-        elif isinstance(data, dict) and 'flights' in data and isinstance(data['flights'], list):
-             return {"flights": data['flights'][:10]}
-        else:
-            print(f"Warning: Unexpected data structure in {filename}.")
-            return {"error": "Could not process the flight data file due to unexpected structure."}
-
-    except json.JSONDecodeError as e:
-        print(f"Error: Could not decode JSON from {filename}. Error: {e}")
-        return {"error": f"Error reading flight data file {filename}. It might be corrupted."}
-    except Exception as e:
-        print(f"An unexpected error occurred while processing {filename}: {e}")
-        traceback.print_exc()
-        return {"error": "An internal error occurred while retrieving flight data."}
+    return db_result # Return result primarily from MongoDB
 
 # --- Updated Test Code ---
 if __name__ == "__main__":
+    # Ensure environment variables for MongoDB are set if needed,
+    # or modify the placeholder values above.
+    # Example using dotenv:
+    # from dotenv import load_dotenv
+    # load_dotenv() # Load .env file if it exists
+
+    print("--- Running Test Cases (using MongoDB primarily) ---")
+
     test_cases = [
-        ("Hanoi", "19/04/2025"),          # Standard format, existing data
-        ("Ho Chi Minh City", "April 20, 2025"), # Month name, existing data
-        ("Hanoi", "2025-12-25"),          # ISO format, non-existing date
-        ("London", "19/04/2025"),         # Unknown origin
-        ("Hanoi", "19th April 2025"),     # Date with "th"
-        ("Hanoi", "invalid-date"),       # Invalid date format
-        ("Da Nang", "20/04/2025")         # Da Nang origin (assuming no DAD file exists yet)
+        ("Hanoi", "25/04/2025"),          # Assumes data exists in DB for this
+        # ("Ho Chi Minh City", "April 24, 2025"), # Assumes data exists in DB for this
+        # ("Hanoi", "2025-12-25"),          # Assumes no data exists in DB
+        # ("London", "19/04/2025"),         # Unknown origin
+        # ("Hanoi", "19th April 2025"),     # Date with "th"
+        # ("Hanoi", "invalid-date"),       # Invalid date format
+        # ("Da Nang", "20/04/2025")         # Assumes data exists in DB for DAD
     ]
 
     for origin, date_str in test_cases:
@@ -136,9 +221,3 @@ if __name__ == "__main__":
         print(json.dumps(result, indent=2, ensure_ascii=False))
         print("-" * 20)
 
-    # Test directly parsing a query string (previous functionality removed)
-    # print("--- Testing query parsing (removed functionality) ---")
-    # query = "Show me flights from Hanoi on 19/04/2025?"
-    # print(f"Query: {query}")
-    # print("Note: Raw query parsing is now handled by the agent's LLM, not this function directly.")
-    # print("-" * 20)
