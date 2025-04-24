@@ -9,3 +9,4 @@ class AgentState(TypedDict):
     query_type: Optional[str]
     intent: Optional[str]
     final_response_data: Any | None = None
+    final_response_tool_name: Optional[str]
