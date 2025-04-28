@@ -11,3 +11,4 @@ numpy==2.2.4
 python-dotenv==1.1.0
 selenium==4.31.0
 pymongo
+langgraph-checkpoint-mongodb

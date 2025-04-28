@@ -1,25 +1,39 @@
 import os
 import traceback
+# import asyncio # Removed
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite import SqliteSaver 
+from langgraph.checkpoint.mongodb import MongoDBSaver 
+from pymongo import MongoClient 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, ToolMessage, AIMessage
 from langchain_community.tools.tavily_search import TavilySearchResults
 from agents.state import AgentState
 from agents.tools import plan_da_nang_trip_tool, book_flights_tool
-import sqlite3
+import sqlite3 # Keep for potential future use or context
 import json
 import logging
 from .history_manager import summarize_conversation_history, prune_conversation_history
 
 load_dotenv()
 
-sqlite_conn = sqlite3.connect("checkpoints.sqlite", check_same_thread=False)
-memory = SqliteSaver(conn=sqlite_conn)
+# sqlite_conn = sqlite3.connect("checkpoints.sqlite", check_same_thread=False)
+# memory = SqliteSaver(conn=sqlite_conn)
+
+mongodb_uri = os.getenv("MONGODB_URI")
+if not mongodb_uri:
+    raise ValueError("MONGODB_URI environment variable not set.")
+mongo_client = MongoClient(mongodb_uri)
+memory = MongoDBSaver(
+    client=mongo_client,
+    db_name="dntrip",
+    collection_name="langgraph_checkpoints"
+)
 
 class Agent:
     def __init__(self):
+        # Removed async init comments
         self.system =  """You are a smart research assistant specialized in Da Nang travel.
 Use the search engine ('tavily_search_results_json') to look up specific, current information relevant to Da Nang travel (e.g., weather, specific opening hours, event details) ONLY IF the user asks for general information that isn't about flights or planning.
 If the user asks for a travel plan and specifies a duration (e.g., 'plan a 3 days 2 nights trip', 'make a plan for 1 week'), use the 'plan_da_nang_trip' tool. Extract the travel duration accurately.
@@ -595,18 +609,9 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
              intent = "general_qa_agent" # Fallback
 
         print(f"--- Returning response with intent: {intent} ---")
-        return {"response": response_content, "intent": intent}
+        # Return thread_id along with response for subsequent requests
+        return {"response": response_content, "intent": intent, "thread_id": thread_id}
 
-# Example of how the agent might be used in app.py (conceptual)
-# if __name__ == "__main__":
-#     agent = Agent()
-#     while True:
-#         query = input("Ask about Da Nang travel: ")
-#         if query.lower() in ["exit", "quit"]:
-#             break
-#         response = agent.run_conversation(query)
-#         print("\nAgent Response:")
-#         print(response)
-#         print("-" * 30)
+# Removed async example usage comments
     
     
