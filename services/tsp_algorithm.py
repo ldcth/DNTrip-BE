@@ -16,9 +16,11 @@ def get_location_hotel():
         # Convert lat/lon to float
         lat = float(selected_hotel.get("lat", 0.0))
         lon = float(selected_hotel.get("lon", 0.0))
+        hotel_name_for_desc = selected_hotel.get("name", "Unknown Hotel")
         return [{
-            "place": selected_hotel.get("name", "Unknown Hotel"),
-            "location": (lat, lon)
+            "place": hotel_name_for_desc,
+            "location": (lat, lon),
+            "description": selected_hotel.get("description", f"Accommodation: {hotel_name_for_desc}")
         }]
     except FileNotFoundError:
         print("Error: hotels.json not found.")
@@ -40,9 +42,12 @@ def get_restaurants():
             try:
                 lat = float(r.get("lat", 0.0))
                 lon = float(r.get("lon", 0.0))
+                name = r.get("name", "Unknown Restaurant") # Get name for fallback description
+                description = r.get("description", f"Enjoy a meal at {name}") # Read description, with a fallback
                 restaurants_list.append({
-                    "place": r.get("name", "Unknown Restaurant"),
-                    "location": (lat, lon)
+                    "place": name,
+                    "location": (lat, lon),
+                    "description": description # Store the description
                     # Add other fields if needed
                 })
             except (ValueError, TypeError):
@@ -70,6 +75,7 @@ def get_must_visit_places():
                 lat = float(p.get("lat", 0.0))
                 lon = float(p.get("lon", 0.0))
                 priority = int(p.get("priority", 99))
+                description = p.get("description", "")
                 # Process time_to_visit into a list/set for easier checking
                 time_str = p.get("time_to_visit", "").lower()
                 times = {t.strip() for t in time_str.split(',') if t.strip()}
@@ -78,7 +84,8 @@ def get_must_visit_places():
                     "place": p.get("name", "Unknown Place"),
                     "location": (lat, lon),
                     "priority": priority,
-                    "times": times
+                    "times": times,
+                    "description": description
                 })
             except (ValueError, TypeError):
                 print(f"Warning: Skipping place due to invalid coordinates or priority: {p.get('name')}")
@@ -254,7 +261,7 @@ def optimize_distance_tour(travel_duration):
 
     # --- Initialize Result Structure --- 
     itinerary_result = {
-        "hotel": {"name": hotel_name, "coords": hotel_coords},
+        "hotel": {"name": hotel_name, "coords": hotel_coords, "description": location_hotel["description"]},
         "daily_plans": []
     }
 
@@ -317,7 +324,8 @@ def optimize_distance_tour(travel_duration):
             "type": "hotel",
             "name": current_name,
             "coords": current_coords,
-            "distance_from_previous_km": 0.0
+            "distance_from_previous_km": 0.0,
+            "description": location_hotel["description"]
         })
 
         # Process time slots sequentially
@@ -330,17 +338,23 @@ def optimize_distance_tour(travel_duration):
                 next_name = item["place"]
                 distance_km = haversine(current_coords, next_coords)
                 
-                # Determine type (simple check based on time slot)
-                location_type = "restaurant" if time_slot in ['Lunch', 'Dinner'] else "place"
-
-                day_data["route"].append({
+                route_stop_data = {
                     "step": step_counter,
                     "time_slot": time_slot,
-                    "type": location_type,
                     "name": next_name,
                     "coords": next_coords,
                     "distance_from_previous_km": round(distance_km, 2)
-                })
+                }
+
+                if time_slot in ['Lunch', 'Dinner']:
+                    route_stop_data["type"] = "restaurant"
+                    route_stop_data["description"] = item.get("description", f"Meal stop: {next_name}")
+                else: # Morning, Afternoon, Evening places
+                    route_stop_data["type"] = "place"
+                    # item["description"] is guaranteed by get_must_visit_places (can be an empty string)
+                    route_stop_data["description"] = item["description"]
+                
+                day_data["route"].append(route_stop_data)
                 
                 # Update current location for the next step
                 current_coords = next_coords
