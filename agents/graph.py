@@ -10,11 +10,12 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, ToolMessage, AIMessage
 from langchain_community.tools.tavily_search import TavilySearchResults
 from agents.state import AgentState
-from agents.tools import plan_da_nang_trip_tool, book_flights_tool
+from agents.tools import plan_da_nang_trip_tool, book_flights_tool, RequestClarificationArgs
 import sqlite3 # Keep for potential future use or context
 import json
 import logging
 from .history_manager import summarize_conversation_history, prune_conversation_history
+from langchain.tools import StructuredTool
 
 load_dotenv()
 
@@ -31,6 +32,15 @@ memory = MongoDBSaver(
     collection_name="langgraph_checkpoints"
 )
 
+# Dummy function for the conceptual tool's schema
+def _dummy_request_clarification_func(missing_parameter_name: str, original_tool_name: str):
+    """This is a dummy function for schema purposes and should not be called directly."""
+    # This function will not be executed by the agent's action node.
+    # Its purpose is to satisfy StructuredTool.from_function requirements.
+    # The actual logic is handled in the graph's routing.
+    print("WARNING: _dummy_request_clarification_func was called. This should not happen.")
+    return "Error: Clarification dummy function was called."
+
 class Agent:
     def __init__(self):
         # Removed async init comments
@@ -38,10 +48,17 @@ class Agent:
 Use the search engine ('tavily_search_results_json') to look up specific, current information relevant to Da Nang travel (e.g., weather, specific opening hours, event details) ONLY IF the user asks for general information that isn't about flights or planning.
 If the user asks for a travel plan and specifies a duration (e.g., 'plan a 3 days 2 nights trip', 'make a plan for 1 week'), use the 'plan_da_nang_trip' tool. Extract the travel duration accurately.
 If the user asks about flights (e.g., 'show me flights from Hanoi', 'find flights to Da Nang on date', 'book flight from SGN'), use the 'book_flights' tool. Extract the origin city and date accurately. You ONLY have flight data for Hanoi (HAN) and Ho Chi Minh City (SGN) departing on tomorrow and the day after tomorrow in the year 2025. Politely inform the user if they ask for other origins or dates using this tool.
-Answer questions ONLY if they are related to travel in Da Nang, Vietnam, including flights *originating* from other Vietnamese cities TO Da Nang (if data exists).
-If a query is relevant but doesn't require planning, flight booking, or external web search, answer directly from your knowledge.WARNING:root:final_response_data exists but final_response_tool_name is 'None'. Falling back.
-If a query is irrelevant (not about Da Nang travel, flights to/from relevant locations, or planning), politely decline.
 
+When essential information for using a tool is missing (e.g., travel duration for 'plan_da_nang_trip', origin/destination or date for 'book_flights'),
+DO NOT attempt to use the tool with incomplete information or guess the missing details.
+Instead, you MUST call the 'request_clarification_tool'.
+When calling 'request_clarification_tool', provide the following arguments:
+- 'missing_parameter_name': A string describing the specific piece of information that is missing (e.g., 'travel_duration', 'flight_origin_city', 'flight_destination_city', 'flight_date').
+- 'original_tool_name': The name of the tool you intended to use (e.g., 'plan_da_nang_trip', 'book_flights').
+
+Answer questions ONLY if they are related to travel in Da Nang, Vietnam, including flights *originating* from other Vietnamese cities TO Da Nang (if data exists).
+If a query is relevant but doesn't require planning, flight booking, or external web search, answer directly from your knowledge.
+If a query is irrelevant (not about Da Nang travel, flights to/from relevant locations, or planning), politely decline.
 """
         self.llm = ChatOpenAI(
                 model="gpt-4o-mini",
@@ -52,7 +69,20 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
         self.planner_tool = plan_da_nang_trip_tool
         self.flight_tool = book_flights_tool
 
-        self.model = self.llm.bind_tools([self.tavily_search, self.planner_tool, self.flight_tool])
+        # Define the conceptual tool for clarification using its Pydantic schema
+        self.request_clarification_tool = StructuredTool.from_function(
+            func=_dummy_request_clarification_func, # Use the dummy function
+            name="request_clarification_tool",
+            description="Use this tool to ask the user for missing information required by another tool.",
+            args_schema=RequestClarificationArgs
+        )
+
+        self.model = self.llm.bind_tools([
+            self.tavily_search, 
+            self.planner_tool, 
+            self.flight_tool, 
+            self.request_clarification_tool # Use the structured tool definition
+        ])
 
         self.router_llm = ChatOpenAI(
                 model="gpt-4o-mini",
@@ -68,6 +98,7 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
         self.graph.add_node("call_llm_with_tools", self.call_llm_with_tools)
         self.graph.add_node("action", self.take_action)
         self.graph.add_node("mark_not_related", self.mark_not_related_node)
+        self.graph.add_node("clarification_node", self.clarification_node)
 
         self.graph.set_entry_point("initial_router")
         self.graph.add_conditional_edges(
@@ -100,11 +131,16 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
         )
         self.graph.add_conditional_edges(
             "call_llm_with_tools",
-            self.exists_action,
-            {True: "action", False: END}
+            self.route_after_llm_call,
+            {
+                "clarification_node": "clarification_node",
+                "action": "action",
+                END: END
+            }
         )
         self.graph.add_edge("direct_llm_answer", END)
         self.graph.add_edge("mark_not_related", END)
+        self.graph.add_edge("clarification_node", END)
 
         self.graph.add_conditional_edges(
             "action",
@@ -117,7 +153,9 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
 
         self.memory = memory
         self.graph = self.graph.compile(checkpointer=self.memory)
+        # Add the conceptual tool name to self.tools dict; it won't have a callable function here.
         self.tools = {t.name: t for t in [self.tavily_search, self.planner_tool, self.flight_tool]}
+        self.tools[self.request_clarification_tool.name] = None # Store by its actual name, still no function
 
     def initial_router(self, state: AgentState):
         """Routes the query based on its type."""
@@ -183,27 +221,59 @@ Respond only with the category name.""")
         return {'messages': [message]}
 
     def check_relevance(self, state: AgentState):
-        """Checks if the user query is related to Da Nang travel (including flights)."""
-        user_message = state['messages'][-1]
-        if not isinstance(user_message, HumanMessage):
-             print("Warning: Expected last message to be HumanMessage for relevance check.")
-             return {"relevance_decision": "end"}
+        """Checks if the user query is related to Da Nang travel, considering recent conversation history."""
+        print("--- Checking Relevance (with history) ---")
+        
+        # Define how many recent messages to include as context (includes the current user message)
+        HISTORY_CONTEXT_SIZE = 5 
 
-        relevance_prompt = SystemMessage(content="""Is the following user query related to travel IN or TO Da Nang, Vietnam? This includes requests for travel plans within Da Nang, flight searches originating from major Vietnamese cities (like Hanoi, Ho Chi Minh City) potentially going to Da Nang, or general questions about Da Nang.
-Respond only with the word 'continue' if it IS related.
-Respond only with the word 'end' if it IS NOT related.""")
+        if not state['messages']:
+            print("Error: No messages in state for relevance check.")
+            return {"relevance_decision": "end"} # Should not happen in normal flow
+
+        # Get the current user message (which is the last one in the list)
+        current_user_message = state['messages'][-1]
+        if not isinstance(current_user_message, HumanMessage):
+            print("Warning: Expected last message to be HumanMessage for relevance check.")
+            # Fallback: treat only the current message as the query if type is unexpected
+            # This path should ideally not be taken.
+            history_for_llm = [current_user_message]
+        else:
+            # Take the last HISTORY_CONTEXT_SIZE messages. This includes the current HumanMessage.
+            start_index = max(0, len(state['messages']) - HISTORY_CONTEXT_SIZE)
+            history_for_llm = state['messages'][start_index:]
+
+        relevance_prompt_system_message = SystemMessage(
+            content="""Analyze the provided conversation history (if any) and the LATEST user query.
+Is the LATEST USER QUERY related to travel IN or TO Da Nang, Vietnam? 
+This includes requests for travel plans within Da Nang, flight searches originating from major Vietnamese cities (like Hanoi, Ho Chi Minh City) potentially going to Da Nang, or general questions about Da Nang.
+Consider if the latest user query is a direct response or follow-up to a previous question from the assistant. An otherwise ambiguous query might be relevant in the context of the conversation.
+For example, if the assistant asked 'How long will your trip be?', a user response like 'for 3 days' IS relevant.
+Respond only with the word 'continue' if the LATEST USER QUERY IS related in the context of the conversation.
+Respond only with the word 'end' if the LATEST USER QUERY IS NOT related, even considering the history."""
+        )
+
+        messages_for_llm = [relevance_prompt_system_message] + history_for_llm
+
+        # Log the types of messages being sent for relevance check
+        print(f"Messages for relevance check LLM (types): {[msg.type for msg in messages_for_llm]}")
+        # For more detailed debugging, uncomment to see content:
+        # for i, msg in enumerate(messages_for_llm):
+        #     content_preview = str(msg.content)[:100].replace("\n", " ") + "..." if len(str(msg.content)) > 100 else str(msg.content)
+        #     print(f"  LLM msg {i} ({msg.type}): {content_preview}")
 
         try:
-            response = self.router_llm.invoke([relevance_prompt, user_message])
+            response = self.router_llm.invoke(messages_for_llm)
             decision = response.content.strip().lower()
-            print(f"Relevance check for query '{user_message.content[:50]}...': {decision}")
+            # Use current_user_message for logging the query content itself
+            print(f"Relevance check for query '{str(current_user_message.content)[:50]}...' (with history): {decision}")
             if decision not in ["continue", "end"]:
                 print(f"Warning: Relevance check returned unexpected value: {decision}. Defaulting to 'end'.")
                 decision = "end"
         except Exception as e:
-             print(f"Error during relevance check: {e}")
-             traceback.print_exc()
-             decision = "end"
+            print(f"Error during relevance check (with history): {e}")
+            traceback.print_exc()
+            decision = "end"
 
         return {"relevance_decision": decision}
 
@@ -295,19 +365,110 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
 
         return {'messages': [message]}
 
-    def exists_action(self, state: AgentState):
+    def route_after_llm_call(self, state: AgentState):
+        """Routes to clarification, action, or ends the turn after LLM tool call attempt."""
+        print("--- Routing after LLM Call with Tools ---")
         last_message = state['messages'][-1]
-        has_tools = (
-            isinstance(last_message, AIMessage) and
-            hasattr(last_message, 'tool_calls') and
-            isinstance(last_message.tool_calls, list) and
-            len(last_message.tool_calls) > 0
-        )
-        print(f"Checking for actions in last message ({type(last_message)}): {has_tools}")
-        if isinstance(last_message, AIMessage) and hasattr(last_message, 'invalid_tool_calls') and last_message.invalid_tool_calls:
-             print(f"Warning: LLM produced invalid tool calls: {last_message.invalid_tool_calls}")
 
-        return has_tools
+        if not isinstance(last_message, AIMessage):
+            print("Warning: Expected last message to be AIMessage in route_after_llm_call. Ending turn.")
+            return END
+
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            print(f"LLM produced tool calls: {last_message.tool_calls}") 
+            for tool_call in last_message.tool_calls:
+                tool_name = tool_call.get('name')
+                tool_args = tool_call.get('args', {})
+                print(f"  - Analyzing tool call: Name='{tool_name}', Args='{tool_args}'")
+
+                if tool_name == self.request_clarification_tool.name:
+                    print(f"LLM requested clarification via {self.request_clarification_tool.name}: {tool_args}. Routing to clarification_node.")
+                    # DO NOT set state['pending_clarification'] here anymore.
+                    # clarification_node will extract args from the AIMessage directly.
+                    return "clarification_node"
+            
+            if any(tc.get('name') != self.request_clarification_tool.name for tc in last_message.tool_calls):
+                print("Actionable tool(s) called by LLM, routing to 'action' node.")
+                return "action"
+        else:
+            print("LLM did not produce any tool calls.")
+
+        print("No actionable tools called by LLM or LLM provided a direct answer. Ending turn or processing direct answer.")
+        return END
+
+    def _get_natural_clarification_question(self, original_tool_name: str, missing_parameter_name: str) -> str:
+        """Generates a more natural-sounding clarification question using an LLM."""
+        print(f"--- Generating natural clarification question for tool: {original_tool_name}, missing: {missing_parameter_name} ---")
+        
+        prompt_messages = [
+            SystemMessage(
+                content="""You are a helpful assistant. Your task is to rephrase a templated clarification question into a more natural, polite, and conversational question for the user. 
+                Do NOT be overly verbose. Keep it concise and friendly.
+                The user was trying to use a specific tool, and a piece of information is missing.
+                
+                Example 1:
+                Original Tool: 'plan_da_nang_trip'
+                Missing Parameter: 'travel_duration'
+                Natural Question: "To help plan your trip to Da Nang, could you let me know how long you'll be staying?"
+
+                Example 2:
+                Original Tool: 'book_flights'
+                Missing Parameter: 'flight_origin_city'
+                Natural Question: "I can help you with flights! What city will you be departing from?"
+                
+                Example 3:
+                Original Tool: 'book_flights'
+                Missing Parameter: 'flight_date'
+                Natural Question: "Sure, I can look up flights for you. What date are you planning to travel?"
+                """
+            ),
+            HumanMessage(
+                content=f"Original Tool: '{original_tool_name}'\nMissing Parameter: '{missing_parameter_name}'\nGenerate a natural question:"
+            )
+        ]
+        
+        try:
+            response = self.router_llm.invoke(prompt_messages) # Use invoke for synchronous
+            natural_question = response.content.strip()
+            print(f"Generated natural question: {natural_question}")
+            return natural_question
+        except Exception as e:
+            print(f"Error generating natural clarification question: {e}. Falling back to template.")
+            return f"To help me with {original_tool_name}, I need a bit more information. Could you please provide the {missing_parameter_name}?"
+
+    def clarification_node(self, state: AgentState):
+        """Generates a clarification question to the user AND a ToolMessage to acknowledge the clarification request."""
+        print("--- Clarification Node ---")
+        
+        last_ai_message = state['messages'][-1]
+        tool_call_id_to_respond_to = None
+        found_tool_args = None
+
+        if isinstance(last_ai_message, AIMessage) and hasattr(last_ai_message, 'tool_calls') and last_ai_message.tool_calls:
+            for tc in last_ai_message.tool_calls:
+                if tc.get('name') == self.request_clarification_tool.name:
+                    tool_call_id_to_respond_to = tc.get('id')
+                    found_tool_args = tc.get('args', {})
+                    print(f"Clarification node found request_clarification_tool call. ID: {tool_call_id_to_respond_to}, Args: {found_tool_args}")
+                    break 
+        
+        if not tool_call_id_to_respond_to or not found_tool_args:
+            print("CRITICAL WARNING: Clarification node reached, but could not find request_clarification_tool call_id or args in the last AIMessage.")
+            return {'messages': [AIMessage(content="I need more details, but encountered an internal hiccup. Could you try rephrasing?")]}
+
+        missing_param = found_tool_args.get("missing_parameter_name", "some specific details")
+        original_tool = found_tool_args.get("original_tool_name", "your request")
+
+        question_to_user = self._get_natural_clarification_question(original_tool, missing_param) # Synchronous call
+        
+        tool_response_message = ToolMessage(
+            content=f"Clarification for {original_tool} regarding {missing_param} is being requested from the user.",
+            tool_call_id=tool_call_id_to_respond_to
+        )
+        
+        ai_question_message = AIMessage(content=question_to_user)
+
+        return {'messages': [tool_response_message, ai_question_message]}
 
     def take_action(self, state: AgentState):
         """Executes tools based on the LLM's request.
@@ -497,16 +658,17 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
         intent = "error" # Default intent
 
         try:
-            # Ensure initial state includes the new field
-            initial_state = {
+            initial_state: AgentState = {
                 "messages": messages,
                 "relevance_decision": None,
                 "query_type": None,
                 "intent": None,
                 "final_response_data": None,
-                "final_response_tool_name": None # <<< Initialize here <<<
+                "final_response_tool_name": None,
+                "information": None, 
+                "pending_clarification": None 
             }
-            final_state = self.graph.invoke(initial_state, config=thread)
+            final_state = self.graph.invoke(initial_state, config=thread) # Synchronous invoke
 
             # Determine intent from final state if available
             if final_state:
