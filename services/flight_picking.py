@@ -18,34 +18,51 @@ def get_mongodb_client():
 # --- New Date Parsing Function ---
 def parse_date_string(date_str: str) -> str | None:
     """
-    Parses a date string in various formats (DD/MM/YYYY, YYYY-MM-DD, Month DD, YYYY, etc.)
+    Parses a date string in various formats (DD/MM/YYYY, YYYY-MM-DD, Month DD, YYYY, DD/MM, Month DD etc.)
     and returns it in ISO format (YYYY-MM-DD).
-    Handles month names (abbreviated and full). Returns None if parsing fails.
+    Handles month names (abbreviated and full). Assumes year 2025 if not provided.
+    Returns None if parsing fails.
     """
     date_str = date_str.strip()
+    DEFAULT_YEAR = 2025
     formats_to_try = [
-        "%d/%m/%Y",  # 19/04/2025
-        "%Y-%m-%d",  # 2025-04-19
-        "%b %d, %Y", # Apr 19, 2025
-        "%B %d, %Y", # April 19, 2025
-        "%d %b %Y",  # 19 Apr 2025
-        "%d %B %Y",  # 19 April 2025
-        # Add more formats if needed
+        # Formats with year (priority)
+        ("%d/%m/%Y", False),
+        ("%Y-%m-%d", False),
+        ("%b %d, %Y", False),
+        ("%B %d, %Y", False),
+        ("%d %b %Y", False),
+        ("%d %B %Y", False),
+
+        # Formats without year (will default to DEFAULT_YEAR)
+        # Assuming DD/MM for numeric only based on existing DD/MM/YYYY
+        ("%d/%m", True),      # e.g. 19/04
+        ("%b %d", True),      # e.g. Apr 19
+        ("%B %d", True),      # e.g. April 19
+        ("%d %b", True),      # e.g. 19 Apr
+        ("%d %B", True),      # e.g. 19 April
     ]
-    for fmt in formats_to_try:
+
+    # Attempt parsing with original string
+    for fmt, assume_default_year in formats_to_try:
         try:
-            # Attempt to parse the date
             date_obj = datetime.strptime(date_str, fmt)
+            if assume_default_year:
+                # If strptime defaults to year 1900 for formats like %m/%d,
+                # or if we explicitly know the format lacks a year.
+                date_obj = date_obj.replace(year=DEFAULT_YEAR)
             return date_obj.strftime("%Y-%m-%d")
         except ValueError:
-            continue # Try the next format
+            continue
 
-    # Handle cases like "April 19th 2025" by removing "st", "nd", "rd", "th"
-    date_str_cleaned = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", date_str, flags=re.IGNORECASE)
-    if date_str_cleaned != date_str:
-         for fmt in formats_to_try:
+    # Handle cases like "April 19th 2025" or "April 19th" by removing "st", "nd", "rd", "th"
+    date_str_cleaned = re.sub(r"(\d+)(st|nd|rd|th)", r"\\1", date_str, flags=re.IGNORECASE)
+    if date_str_cleaned != date_str: # Only proceed if cleaning changed the string
+         for fmt, assume_default_year in formats_to_try:
              try:
                  date_obj = datetime.strptime(date_str_cleaned, fmt)
+                 if assume_default_year:
+                     date_obj = date_obj.replace(year=DEFAULT_YEAR)
                  return date_obj.strftime("%Y-%m-%d")
              except ValueError:
                  continue
@@ -209,9 +226,17 @@ if __name__ == "__main__":
         # ("Ho Chi Minh City", "April 24, 2025"), # Assumes data exists in DB for this
         # ("Hanoi", "2025-12-25"),          # Assumes no data exists in DB
         # ("London", "19/04/2025"),         # Unknown origin
-        # ("Hanoi", "19th April 2025"),     # Date with "th"
-        # ("Hanoi", "invalid-date"),       # Invalid date format
+        ("Hanoi", "19th April 2025"),     # Date with "th", with year
+        ("Hanoi", "19th April"),          # Date with "th", no year -> should be 2025-04-19
+        ("Hanoi", "invalid-date"),       # Invalid date format
         # ("Da Nang", "20/04/2025")         # Assumes data exists in DB for DAD
+
+        # New test cases for day/month input with default year 2025
+        ("Hanoi", "25/04"),               # DD/MM -> should be 2025-04-25
+        ("Hanoi", "Apr 26"),              # Mon DD -> should be 2025-04-26
+        ("Hanoi", "27 Apr"),              # DD Mon -> should be 2025-04-27
+        ("Saigon", "May 10"),             # Test with another city and month name -> 2025-05-10
+        ("Da Nang", "15/11"),             # Test another city DD/MM -> 2025-11-15
     ]
 
     for origin, date_str in test_cases:
