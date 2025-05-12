@@ -112,6 +112,7 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
         self.graph.add_node("action", self.take_action)
         self.graph.add_node("mark_not_related", self.mark_not_related_node)
         self.graph.add_node("clarification_node", self.clarification_node)
+        self.graph.add_node("retrieve_stored_information", self.retrieve_stored_information)
 
         self.graph.set_entry_point("initial_router")
         self.graph.add_conditional_edges(
@@ -138,6 +139,7 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
                 "plan_agent": "call_llm_with_tools",
                 "flight_agent": "call_llm_with_tools",
                 "information_agent": "call_llm_with_tools",
+                "retrieve_information": "retrieve_stored_information",
                 "general_qa_agent": "call_llm_with_tools",
                 "error": END
             }
@@ -154,6 +156,7 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
         self.graph.add_edge("direct_llm_answer", END)
         self.graph.add_edge("mark_not_related", END)
         self.graph.add_edge("clarification_node", END)
+        self.graph.add_edge("retrieve_stored_information", END)
 
         self.graph.add_conditional_edges(
             "action",
@@ -179,8 +182,8 @@ If a query is irrelevant (not about Da Nang travel, flights to/from relevant loc
 
         routing_prompt = SystemMessage(content="""Classify the following user query into one of these categories:
 - 'persona': Questions about the bot's identity or capabilities (e.g., 'Who are you?', 'What can you do?')
-- 'history': Questions about the conversation history (e.g., 'What was my last question?')
-- 'content': Any other type of question, including travel planning, flight searches, or general info requests.
+- 'history': Questions ONLY about the sequence or flow of the conversation itself (e.g., 'What did I ask you last?', 'Summarize our chat'). Do NOT use this for requests to *recall* information previously discussed.
+- 'content': Any other type of question, including travel planning, flight searches, general info requests, OR requests to *recall* or *repeat* information previously provided (e.g., 'show me the plan again', 'what were those flights?').
 Respond only with the category name.""")
 
         try:
@@ -239,63 +242,75 @@ Respond only with the category name.""")
         
         # ADDED DEBUG LOGGING
         information_at_relevance_check_start = state.get("information", {})
-        print(f"DEBUG: information at start of check_relevance: {json.dumps(information_at_relevance_check_start, indent=2)}")
+        # Log keys and whether they have non-None/non-empty data
+        info_status = {}
+        for k, v in information_at_relevance_check_start.items():
+            if isinstance(v, (list, dict)):
+                info_status[k] = f"len={len(v)}"
+            elif v is not None:
+                info_status[k] = "present"
+            else:
+                info_status[k] = "empty/None"
+        print(f"DEBUG: information status at start of check_relevance: {info_status}")
+
+        # Prepare the full information state as a string for the LLM prompt
+        info_state_string = "Current relevant information stored: " + (
+            json.dumps(information_at_relevance_check_start, indent=2, ensure_ascii=False) 
+            if information_at_relevance_check_start 
+            else "None"
+        )
+        # Limit string length for prompt to avoid excessive size
+        MAX_INFO_STRING_LEN = 1000 
+        if len(info_state_string) > MAX_INFO_STRING_LEN:
+            info_state_string = info_state_string[:MAX_INFO_STRING_LEN] + "... (truncated due to length)"
+
         # Define how many recent messages to include as context (includes the current user message)
         HISTORY_CONTEXT_SIZE = 5 
 
         if not state['messages']:
             print("Error: No messages in state for relevance check.")
-            return {"relevance_decision": "end"} # Should not happen in normal flow
+            return {"relevance_decision": "end"}
 
-        # Get the current user message (which is the last one in the list)
-        current_user_message_for_logging = state['messages'][-1] # Renamed to avoid conflict
-        if not isinstance(current_user_message_for_logging, HumanMessage):
-            print("Warning: Expected last message to be HumanMessage for relevance check.")
-            # Fallback behavior is implicitly handled by how history_selection_for_llm is processed,
-            # ensuring if the last message is HumanMessage, it's likely included.
-
-        # Take the last HISTORY_CONTEXT_SIZE messages.
+        current_user_message_for_logging = state['messages'][-1]
         start_index = max(0, len(state['messages']) - HISTORY_CONTEXT_SIZE)
         history_selection_for_llm = state['messages'][start_index:]
 
-        # Filter out any leading ToolMessages from history_selection_for_llm
-        # as they cannot validly follow a SystemMessage in the final list for the LLM.
         first_valid_idx = 0
-        if history_selection_for_llm: # Only iterate if not empty
+        if history_selection_for_llm:
             for idx, msg in enumerate(history_selection_for_llm):
                 if not isinstance(msg, ToolMessage):
                     first_valid_idx = idx
                     break
-                # If all messages in the slice are ToolMessages (idx reaches end and last msg is ToolMessage)
                 if idx == len(history_selection_for_llm) - 1 and isinstance(msg, ToolMessage):
-                    first_valid_idx = len(history_selection_for_llm) # This will make the slice empty
-            
+                    first_valid_idx = len(history_selection_for_llm)
         processed_history_for_llm = history_selection_for_llm[first_valid_idx:]
 
-        # If processed_history_for_llm became empty after filtering (e.g., the slice only contained ToolMessages),
-        # and the actual last message in the full state is a HumanMessage (the user's current query),
-        # ensure that this HumanMessage is included in the history for the relevance check LLM.
         if not processed_history_for_llm and isinstance(state['messages'][-1], HumanMessage):
             processed_history_for_llm = [state['messages'][-1]]
 
-
         relevance_prompt_system_message = SystemMessage(
-            content="""Analyze the provided conversation history (if any) and the LATEST user query.
-Your goal is to determine if the LATEST USER QUERY is a relevant continuation of the Da Nang travel-focused conversation, or if it's an unrelated topic.
+            content=f"""Analyze the provided conversation history (if any), the LATEST user query, AND the currently stored information.
+Currently Stored Information: 
+```json
+{info_status}
+```
+(This shows the full data like 'available_flights', 'confirmed_booking_details', or 'current_trip_plan' currently in memory. It might be truncated if very large.)
+
+Your goal is to determine if the LATEST USER QUERY is a relevant continuation of the Da Nang travel-focused conversation.
 
 Specifically, the LATEST USER QUERY IS RELEVANT (respond 'continue') if it:
 1. Directly asks about travel IN or TO Da Nang, Vietnam (e.g., planning, flights, attractions, general info about Da Nang).
-2. Is a direct response to a question the assistant just asked (e.g., assistant asks for date, user provides date).
-3. Is an action or selection related to options the assistant just presented (e.g., assistant shows flights, user says 'book the first one'; assistant shows hotel options, user picks one).
+2. Is a direct response to a question the assistant just asked.
+3. Is an action or selection related to options the assistant just presented.
+4. Is a request to recall, review, or see information previously stored or confirmed (e.g., 'show my booked flight', 'what was the plan?').
+5. Relates directly to the data shown in the 'Currently Stored Information' above.
 
-The LATEST USER QUERY IS NOT RELEVANT (respond 'end') if it introduces a topic clearly outside of Da Nang travel and is not a direct follow-up to an assistant's question or presented options (e.g., 'who is the president?', 'what's the capital of France?') unless that question was explicitly solicited by the assistant for some reason.
+The LATEST USER QUERY IS NOT RELEVANT (respond 'end') if it introduces a topic clearly outside of Da Nang travel AND is not a direct follow-up to an assistant's question, presented options, or the stored information.
 
 Respond only with the single word 'continue' or 'end'."""
         )
 
         messages_for_llm = [relevance_prompt_system_message] + processed_history_for_llm
-
-        # Log the types of messages being sent for relevance check
         print(f"Messages for relevance check LLM (types): {[msg.type for msg in messages_for_llm]}")
 
         try:
@@ -374,15 +389,16 @@ Respond only with the single word 'continue' or 'end'."""
 - 'plan_agent': User wants a travel plan/itinerary for Da Nang (e.g., 'plan a 3 day trip to Da Nang', 'make an itinerary').
 - 'flight_agent': User is asking about flights, potentially to or from Da Nang (e.g., 'flights from Hanoi?', 'show flights on date', 'book a flight from Saigon?', 'select the first flight', 'the one at 9pm').
 - 'information_agent': User is asking a question likely requiring external, up-to-date information about Da Nang (weather, opening hours, specific events, prices) that isn't about flights or planning.
-- 'general_qa_agent': User is asking a general question about Da Nang that might be answerable from general knowledge or conversation history, without needing specific tools.
-Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general_qa_agent'."""
+- 'retrieve_information': User is asking to see information the assistant has previously provided or confirmed, like a booked flight, the list of available flights shown earlier, or the current travel plan (e.g., 'show me my booked flight', 'what were those flights again?', 'can I see the plan?').
+- 'general_qa_agent': User is asking a general question about Da Nang that might be answerable from general knowledge or conversation history, without needing specific tools or stored information retrieval.
+Respond only with 'plan_agent', 'flight_agent', 'information_agent', 'retrieve_information', or 'general_qa_agent'."""
         intent_prompt = SystemMessage(content=intent_prompt_text)
 
         try:
             response = self.router_llm.invoke([intent_prompt, user_message])
             intent = response.content.strip().lower()
             print(f"LLM-based intent routing for query '{user_message.content[:50]}...': {intent}")
-            valid_intents = ["plan_agent", "flight_agent", "information_agent", "general_qa_agent"]
+            valid_intents = ["plan_agent", "flight_agent", "information_agent", "retrieve_information", "general_qa_agent"]
             if intent not in valid_intents:
                 print(f"Warning: LLM-based intent routing returned unexpected value: {intent}. Defaulting to 'general_qa_agent'.")
                 intent = "general_qa_agent"
@@ -396,16 +412,12 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
     def route_based_on_intent(self, state: AgentState):
         """Returns the classification result."""
         intent = state.get("intent")
+        valid_intents = {'plan_agent', 'flight_agent', 'information_agent', 'retrieve_information', 'general_qa_agent'}
+        if intent not in valid_intents:
+            print(f"Warning: Unrecognized intent '{intent}'. Routing to general QA.")
+            return "general_qa_agent"
         print(f"Routing based on intent: {intent}")
-        if intent:
-            if intent in ["plan_agent", "flight_agent", "information_agent", "general_qa_agent"]:
-                return intent
-            else:
-                print(f"Warning: Invalid intent '{intent}' found in state. Defaulting to error.")
-                return "error"
-        else:
-            print("Warning: Intent not found in state. Defaulting to error.")
-            return "error"
+        return intent
 
     def call_llm_with_tools(self, state: AgentState):
         """Calls the main LLM bound with all relevant tools."""
@@ -643,7 +655,7 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
                                 price = selected_flight.get('price', 'N/A')
                                 result_content_for_message = f"Successfully selected flight: {flight_id}, departing at {dep_time}, price {price}."
                                 current_information['confirmed_booking_details'] = selected_flight
-                                current_information.pop('available_flights', None)
+                                # current_information.pop('available_flights', None)
                                 current_information['flight_search_completed_awaiting_selection'] = False
                             else:
                                 result_content_for_message = selection_result.get("message", "Could not select the flight.")
@@ -800,6 +812,53 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
         print("Query marked as not related to Da Nang travel.")
         return {"messages": [AIMessage(content="I apologize, but I specialize only in travel related to Da Nang, Vietnam, including planning trips there and checking flights from major Vietnamese cities. I cannot answer questions outside this scope.")]}
 
+    def retrieve_stored_information(self, state: AgentState):
+        """Retrieves previously stored information based on user query and state."""
+        print("---RETRIEVING STORED INFORMATION---")
+        messages = state['messages']
+        last_human_message = messages[-1]
+        if not isinstance(last_human_message, HumanMessage):
+            return {"messages": [AIMessage(content="I need your request to retrieve information.")], "final_response_tool_name": "error_no_human_message"}
+
+        user_query = last_human_message.content.lower()
+        information = state.get('information', {})
+        response_message = "I couldn't find the specific information you asked for in my current memory."
+        retrieved_data_type = "retrieved_nothing" # Default
+
+        # Check for requests about confirmed/booked flights
+        if ("booked" in user_query or "confirmed" in user_query or "selected flight" in user_query) and information.get('confirmed_booking_details'):
+            response_message = f"Okay, here is the confirmed flight detail I have for you."
+            retrieved_data_type = "retrieved_flight_details"
+
+        # Check for requests about previously shown available flights
+        elif ("available flights" in user_query or "flights again" in user_query or "show flights" in user_query) and information.get('available_flights'):
+            flights = information['available_flights']
+            if flights:
+                response_message = f"Okay, here are the {len(flights)} flight options I found previously."
+                retrieved_data_type = "retrieved_available_flights"
+            else:
+                response_message = "I found no available flights previously."
+                retrieved_data_type = "retrieved_no_available_flights"
+
+        # Check for requests about the current plan
+        elif ("plan" in user_query or "itinerary" in user_query) and information.get('current_trip_plan'):
+            response_message = f"Okay, here is the current trip plan we discussed."
+            retrieved_data_type = "retrieved_plan"
+
+        # Fallback if specific data not found or query is generic retrieval
+        elif retrieved_data_type == "retrieved_nothing":
+             if information:
+                 response_message = "I found some information stored for our conversation, but not the specific item you asked for. Here is what I have:"
+                 retrieved_data_type = "retrieved_generic_info"
+             else:
+                 response_message = "I don't have any specific information stored for our current conversation yet."
+                 # retrieved_data_type remains "retrieved_nothing"
+
+        return {
+            "messages": [AIMessage(content=response_message)],
+            "final_response_tool_name": retrieved_data_type # Signal what was retrieved
+            }
+
     def run_conversation(self, query: str, thread_id: str | None = None):
         messages = [HumanMessage(content=query)]
         thread = {"configurable": {"thread_id": thread_id}}
@@ -857,21 +916,23 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
             # Extract results from the *current turn's* graph execution
             final_response_data_from_turn = final_state.get("final_response_data")
             final_tool_name_from_turn = final_state.get("final_response_tool_name")
-            current_turn_graph_intent = final_state.get("intent") # Output of intent_router for this turn
-            current_turn_query_type = final_state.get("query_type") # Output of initial_router
-            current_turn_relevance = final_state.get("relevance_decision") # Output of relevance_checker
+            # Output of the intent_router node for *this turn*
+            current_turn_graph_intent = final_state.get("intent")
+            current_turn_query_type = final_state.get("query_type")
+            current_turn_relevance = final_state.get("relevance_decision")
 
             # Extract potentially persistent information (might be from previous turns, updated by current)
             persistent_information = final_state.get("information", {})
-            available_flights_in_persistent_state = persistent_information.get('available_flights', [])
-            # flight_search_completed_flag_in_state = persistent_information.get('flight_search_completed_awaiting_selection', False)
+            # available_flights_in_persistent_state = persistent_information.get('available_flights', []) # Example if needed elsewhere
 
-            # 1. Determine the primary intent for THIS response payload
+            # --- 1. Determine the primary intent for THIS response payload --- #
+
             if current_turn_relevance == "end":
                 determined_intent = "not_related"
-                # Message is already from mark_not_related_node, no extra data needed.
+                # Message is already from mark_not_related_node
             elif final_response_data_from_turn is not None:
-                # A tool in the current turn produced a definitive final output that should be part of the payload
+                # A tool in the *current turn* produced a definitive final output.
+                # Use the tool name to determine intent and add data.
                 if final_tool_name_from_turn == "confirmed_flight_selection":
                     determined_intent = "flight_selection_confirmed"
                     response_data_for_payload["selected_flight_details"] = final_response_data_from_turn
@@ -880,53 +941,45 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
                     response_data_for_payload["plan_details"] = final_response_data_from_turn
                 elif final_tool_name_from_turn == "flights_found_summary":
                     determined_intent = "flights_found_awaiting_selection"
-                    # Message in final_response_data_from_turn is the summary string from the tool.
-                    # Flights data was stored in 'information' by take_action in *this turn*.
-                    response_data_for_payload["flights"] = available_flights_in_persistent_state
+                    # Message is summary string, flights were stored in information *this turn*
+                    response_data_for_payload["flights"] = persistent_information.get('available_flights', []) # Use get for safety
                 elif final_tool_name_from_turn in ["flights_not_found_summary", "flights_tool_error_or_message", "flights_tool_format_error", "flights_tool_processing_error"]:
-                    determined_intent = "flight_search_direct_message" # Tool gave a message, no structured flight data.
+                    determined_intent = "flight_search_direct_message"
                     # Message is in final_response_data_from_turn.
-                elif final_tool_name_from_turn: # A generic tool result
+                elif final_tool_name_from_turn:
                     determined_intent = "tool_result"
                     response_data_for_payload[f"{final_tool_name_from_turn}_data"] = final_response_data_from_turn
-                else: # final_response_data_from_turn is not None, but final_tool_name_from_turn is None.
-                      # This path should ideally not be hit if take_action always sets final_tool_name_from_turn when setting final_response_data_from_turn.
+                else:
                     determined_intent = "unknown_tool_result_with_data"
                     response_data_for_payload["data"] = final_response_data_from_turn
             else:
-                # final_response_data_from_turn is None. The graph ended with an AIMessage not directly from a tool's structured output.
-                # This could be a direct LLM answer, a clarification, or an LLM-formulated response after a tool.
+                # No direct tool output *this turn*. Determine intent based on graph flow.
                 if current_turn_query_type in ["persona", "history"]:
                     determined_intent = "direct_answer"
-                elif current_turn_graph_intent: # Use intent from intent_router for current query
-                    determined_intent = current_turn_graph_intent # e.g., "plan_agent", "flight_agent", "general_qa_agent"
+                elif current_turn_graph_intent == "retrieve_information":
+                    determined_intent = "retrieve_information"
+                    # The retrieve_stored_information node set the final_tool_name_from_turn
+                    # Use that name to decide which data to potentially attach from persistent state
+                    if final_tool_name_from_turn == "retrieved_flight_details" and persistent_information.get('confirmed_booking_details'):
+                        response_data_for_payload["confirmed_flight_details"] = persistent_information['confirmed_booking_details']
+                    elif final_tool_name_from_turn == "retrieved_available_flights" and persistent_information.get('available_flights'):
+                        response_data_for_payload["flights"] = persistent_information['available_flights']
+                    elif final_tool_name_from_turn == "retrieved_plan" and persistent_information.get('current_trip_plan'):
+                        response_data_for_payload["plan_details"] = persistent_information['current_trip_plan']
+                    elif final_tool_name_from_turn == "retrieved_generic_info":
+                        response_data_for_payload["stored_information"] = persistent_information
+                    # If retrieved_nothing or retrieved_no_available_flights, add no extra data.
+                elif current_turn_graph_intent == "clarification_request": # Check if clarification was generated
+                     determined_intent = "clarification_request"
+                     # (Clarification node handles message, no extra data needed here)
+                elif current_turn_graph_intent: # Fallback to intent router output
+                     determined_intent = current_turn_graph_intent
+                # Default determined_intent remains general_qa_agent if none of the above match
 
-                    # Check if this turn resulted in a clarification request being generated
-                    messages_history = final_state.get('messages', [])
-                    if len(messages_history) >= 3 and \
-                       isinstance(messages_history[-1], AIMessage) and \
-                       isinstance(messages_history[-2], ToolMessage) and \
-                       isinstance(messages_history[-3], AIMessage) and \
-                       hasattr(messages_history[-3], 'tool_calls') and messages_history[-3].tool_calls:
-                        for tc in messages_history[-3].tool_calls:
-                            if tc.get('name') == self.request_clarification_tool.name and \
-                               tc.get('id') == messages_history[-2].tool_call_id:
-                                determined_intent = "clarification_request"
-                                break
-                elif "I apologize, but I specialize only in travel related to Da Nang" in final_ai_message_content:
-                    determined_intent = "not_related" # Fallback if relevance check somehow missed it
-
-            # 2. Conditionally add structured data if current intent warrants it and data exists from a previous relevant turn
-            #    (This is mainly for flight_agent when LLM answers from history without re-running the tool)
-            if determined_intent == "flight_agent" and \
-               final_response_data_from_turn is None and \
-               determined_intent != "clarification_request" and \
-               available_flights_in_persistent_state:
-                # Current query is about flights (e.g. "show them again", "what about the vietjet one?"),
-                # LLM is answering (no tool summary *this turn*), it's not a clarification, AND flights were previously found.
-                response_data_for_payload["flights"] = available_flights_in_persistent_state
-                # Consider if intent should be 'flights_found_awaiting_selection' here for consistency,
-                # but 'flight_agent' with 'flights' data also works.
+            # --- 2. Conditionally add data for specific intents (if not added above) --- #
+            # Example: If flight_agent intent, maybe add available flights from persistent state
+            # if determined_intent == "flight_agent" and not response_data_for_payload.get("flights") and persistent_information.get('available_flights'):
+            #     response_data_for_payload["flights"] = persistent_information['available_flights']
 
             # Final payload structure
             response_payload = {
@@ -958,7 +1011,7 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', or 'general
                          "direct_answer", "not_related", "error", "tool_result",
                          "flight_selection_confirmed", "flights_found_awaiting_selection",
                          "clarification_request", "flight_search_direct_message",
-                         "unknown_tool_result_with_data"] # Added new potential intents
+                         "unknown_tool_result_with_data", "retrieve_information"] # Added retrieve_information
         if response_payload["intent"] not in valid_intents:
              print(f"Warning: Final intent '{response_payload['intent']}' is not in the expected list. Defaulting to 'general_qa_agent'.")
              response_payload["intent"] = "general_qa_agent" # Fallback
