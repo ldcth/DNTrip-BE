@@ -6,4 +6,5 @@ scrapper/error/
 *.sqlite-shm
 *.sqlite-wal
 env.sh
+test.sh
 /progress

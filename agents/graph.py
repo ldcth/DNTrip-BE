@@ -47,7 +47,27 @@ class Agent:
         # Removed async init comments
         self.system =  """You are a smart research assistant specialized in Da Nang travel.
 Use the search engine ('tavily_search_results_json') to look up specific, current information relevant to Da Nang travel (e.g., weather, specific opening hours, event details) ONLY IF the user asks for general information that isn't about flights or planning.
-If the user asks for a travel plan and specifies a duration (e.g., 'plan a 3 days 2 nights trip', 'make a plan for 1 week'), use the 'plan_da_nang_trip' tool. Extract the travel duration accurately.
+
+If the user asks for a travel plan (e.g., 'plan a 3 days 2 nights trip', 'make a plan for 1 week'):
+- Use the 'plan_da_nang_trip' tool. Accurately extract the travel duration.
+- If the user ALSO specifies particular places to visit at certain times (e.g., 'include Ba Na Hills on day 1 morning', 'I want to go to XYZ bookstore at 123 Main St on day 2 evening'), you MUST include these details in the 'user_specified_stops' argument for the 'plan_da_nang_trip' tool.
+- For each specific stop, provide:
+    - 'name': The name of the place.
+    - 'day': An integer for the day number in the itinerary (e.g., 1 for Day 1).
+    - 'time_of_day': A string like 'morning', 'afternoon', or 'evening'.
+    - 'address': (Optional) If the user provides an address for a custom location not widely known in Da Nang, include it. Otherwise, omit.
+- If the user wants to ADJUST an existing plan (e.g., "add Marble Mountains to my current plan for day 2 morning", "change my plan to include Con Market on day 1 afternoon"):
+    - You should still use the 'plan_da_nang_trip' tool.
+    - Provide the original or intended 'travel_duration'.
+    - Formulate a NEW list of 'user_specified_stops' that includes ALL desired stops (both old ones to keep, if any, and new ones to add/change). The tool does not remember past specified stops from previous calls; you must provide the complete list of desired specific stops each time you want them considered.
+- IMPORTANT: After a successful call to 'plan_da_nang_trip', the subsequent ToolMessage will contain the full plan details (base plan, user specified stops, notes) as a JSON string.
+  Your response to the user MUST clearly manage expectations based on this JSON data:
+  1. Present the `base_plan` day by day as suggested by the automated planner.
+  2. If `user_specified_stops` are present in the JSON, list them clearly, stating what was requested (name, day, time).
+  3. Refer to the `notes` section from the tool's JSON output. Based on these notes, you MUST explain that the `base_plan` is an automated suggestion.
+  4. Crucially, state that the user's specific requests (`user_specified_stops`) are NOT automatically integrated into the `base_plan`'s optimized route by the current planning algorithm. The `base_plan` is generated independently.
+  5. Advise the user that they should consider the `base_plan` as a starting point and may need to manually adjust it to incorporate their specific requests. For example: "Here's a suggested base itinerary. You also requested [X specific stop] for [Day Y, time]. Please note that the automated base plan is generated independently and doesn't dynamically incorporate your specific requests into its route. You may need to adjust this suggested plan to fit in [X specific stop] as desired. The base plan, for instance, suggests [mention what base plan has for that slot, if anything different]."
+  Make your overall response transparent and helpful, clearly delineating between the automated suggestion and the user's specific, noted requests.
 
 If the user asks about flights (e.g., 'show me flights to Da Nang on date', 'find flights from Hanoi to Da Nang on date'):
 - First, ensure the user has provided both the ORIGIN CITY (e.g., 'Hanoi', 'Ho Chi Minh City') and the DEPARTURE DATE (e.g., 'May 12', '2025-05-12'). 
@@ -64,7 +84,7 @@ When essential information for using ANY tool is missing (including for 'select_
 DO NOT attempt to use the tool with incomplete information or guess the missing details.
 Instead, you MUST call the 'request_clarification_tool'.
 When calling 'request_clarification_tool', provide the following arguments:
-- 'missing_parameter_name': A string describing the specific piece of information that is missing (e.g., 'travel_duration', 'flight_origin_city', 'flight_date', 'flight_selection_details').
+- 'missing_parameter_name': A string describing the specific piece of information that is missing (e.g., 'travel_duration', 'flight_origin_city', 'flight_date', 'flight_selection_details', 'user_specified_stops_detail').
 - 'original_tool_name': The name of the tool you intended to use (e.g., 'plan_da_nang_trip', 'show_flight', 'select_flight_tool').
 
 Answer questions ONLY if they are related to travel in Da Nang, Vietnam, including flights *originating* from other Vietnamese cities TO Da Nang (if data exists).
@@ -296,10 +316,10 @@ Currently Stored Information:
 ```
 (This shows the full data like 'available_flights', 'confirmed_booking_details', or 'current_trip_plan' currently in memory. It might be truncated if very large.)
 
-Your goal is to determine if the LATEST USER QUERY is a relevant continuation of the Da Nang travel-focused conversation.
+Your goal is to determine if the LATEST USER QUERY is relevant to Da Nang travel, considering the conversation context and stored information.
 
 Specifically, the LATEST USER QUERY IS RELEVANT (respond 'continue') if it:
-1. Directly asks about travel IN or TO Da Nang, Vietnam (e.g., planning, flights, attractions, general info about Da Nang).
+1. Directly asks about travel IN or TO Da Nang, Vietnam (e.g., planning, flights, attractions, general info or weather about Da Nang).
 2. Is a direct response to a question the assistant just asked.
 3. Is an action or selection related to options the assistant just presented.
 4. Is a request to recall, review, or see information previously stored or confirmed (e.g., 'show my booked flight', 'what was the plan?').
@@ -307,6 +327,7 @@ Specifically, the LATEST USER QUERY IS RELEVANT (respond 'continue') if it:
 
 The LATEST USER QUERY IS NOT RELEVANT (respond 'end') if it introduces a topic clearly outside of Da Nang travel AND is not a direct follow-up to an assistant's question, presented options, or the stored information.
 
+IMPORTANT: Your response MUST be ONLY the single word 'continue' or the single word 'end'. Do NOT provide any other text, explanation, or formatting.
 Respond only with the single word 'continue' or 'end'."""
         )
 
@@ -725,27 +746,30 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', 'retrieve_i
                         tool_messages_to_return.append(ToolMessage(tool_call_id=tool_call_id, name=tool_name, content=result_content_for_message))
                     
                     elif tool_name == self.planner_tool.name: # 'plan_da_nang_trip'
-                        # ... (existing logic for planner_tool - seems okay)
+                        # raw_result is the JSON string from the tool
                         try:
+                            # Try to parse it to validate and store structured data
                             parsed_data = json.loads(raw_result)
                             if isinstance(parsed_data, dict) and parsed_data and not parsed_data.get('error'):
                                 current_final_data = parsed_data 
                                 current_final_tool_name = tool_name
-                                result_content_for_message = "Successfully generated the travel plan."
-                                current_information['current_trip_plan'] = parsed_data 
+                                current_information['current_trip_plan'] = parsed_data
+                                # The content for the ToolMessage should be the raw_result (the full JSON string from the tool)
+                                # so the subsequent LLM call has all details to formulate a user-facing message.
+                                result_content_for_message = raw_result 
                             elif isinstance(parsed_data, dict) and ('error' in parsed_data or 'message' in parsed_data):
                                 result_content_for_message = parsed_data.get('error') or parsed_data.get('message')
                                 current_final_data = None 
                                 current_final_tool_name = None
-                            else:
+                            else: # Should not happen if tool returns valid JSON or JSON error string
                                 result_content_for_message = raw_result 
                                 current_final_data = None
                                 current_final_tool_name = None
-                        except json.JSONDecodeError:
+                        except json.JSONDecodeError: # If raw_result is not valid JSON (e.g. plain error string from tool unexpectedly)
                             result_content_for_message = raw_result 
                             current_final_data = None
                             current_final_tool_name = None
-                        except Exception as format_err:
+                        except Exception as format_err: # Catch other potential errors during parsing/handling
                              result_content_for_message = f"Error processing {tool_name} results: {format_err}"
                              current_final_data = None
                              current_final_tool_name = None
@@ -798,8 +822,13 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', 'retrieve_i
             if final_tool_name == "confirmed_flight_selection":
                 print("Routing after action: Flight selection confirmed. Continuing to LLM for final message formulation.")
                 return "continue" # Go to call_llm_with_tools
+            # For plan_da_nang_trip, the tool's output is now the final_data.
+            # The LLM should formulate the response based on this rich data.
+            elif final_tool_name == self.planner_tool.name: # plan_da_nang_trip
+                print(f"Routing after action: '{self.planner_tool.name}' tool executed. Data prepared. Continuing to LLM for response formulation.")
+                return "continue" # Go to call_llm_with_tools to formulate response from the rich plan object
             else:
-                # For other tools that set final_data (like planner), finish directly.
+                # For other tools that set final_data (like original tavily), finish directly.
                 print(f"Routing after action: final_response_data found from tool '{final_tool_name}'. Finishing.")
                 return "finish" # Routes to END
         else:
@@ -937,8 +966,21 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', 'retrieve_i
                     determined_intent = "flight_selection_confirmed"
                     response_data_for_payload["selected_flight_details"] = final_response_data_from_turn
                 elif final_tool_name_from_turn == 'plan_da_nang_trip':
-                    determined_intent = "plan_agent" # Or "plan_generated"
+                    determined_intent = "plan_agent" # Or "plan_generated" / "plan_updated"
+                    # final_response_data_from_turn already contains the rich plan object
+                    # (base_plan, user_specified_stops, notes)
                     response_data_for_payload["plan_details"] = final_response_data_from_turn
+                    
+                    # Move the detailed LLM conversational summary into plan_details
+                    # and set a concise main message.
+                    if isinstance(response_data_for_payload["plan_details"], dict):
+                        response_data_for_payload["plan_details"]["conversational_summary"] = final_ai_message_content # The LLM's summary
+                    else: # Should not happen, plan_details should be a dict
+                        response_data_for_payload["plan_details"] = {"raw_data": final_response_data_from_turn, "conversational_summary": final_ai_message_content}
+                    
+                    # Set a concise message for the main response field
+                    response_data_for_payload["message"] = "I have prepared a travel plan for you. Please see the details."
+
                 elif final_tool_name_from_turn == "flights_found_summary":
                     determined_intent = "flights_found_awaiting_selection"
                     # Message is summary string, flights were stored in information *this turn*
@@ -966,6 +1008,16 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', 'retrieve_i
                         response_data_for_payload["flights"] = persistent_information['available_flights']
                     elif final_tool_name_from_turn == "retrieved_plan" and persistent_information.get('current_trip_plan'):
                         response_data_for_payload["plan_details"] = persistent_information['current_trip_plan']
+                        # Ensure the message reflects what plan_details contains (it could be the rich object)
+                        if isinstance(persistent_information['current_trip_plan'], dict):
+                            if 'base_plan' in persistent_information['current_trip_plan'] and persistent_information['current_trip_plan'].get('user_specified_stops'):
+                                final_ai_message_content = "Okay, here is the current trip plan, including the base itinerary and your specified stops."
+                            elif 'base_plan' in persistent_information['current_trip_plan']:
+                                final_ai_message_content = "Okay, here is the current base trip plan we discussed."
+                            else: # Should be the rich plan structure
+                                final_ai_message_content = "Okay, here is the stored travel plan information."
+                        # Update the message in the payload if it was changed
+                        response_data_for_payload["message"] = final_ai_message_content
                     elif final_tool_name_from_turn == "retrieved_generic_info":
                         response_data_for_payload["stored_information"] = persistent_information
                     # If retrieved_nothing or retrieved_no_available_flights, add no extra data.
