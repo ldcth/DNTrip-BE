@@ -56,11 +56,21 @@ If the user asks for a travel plan (e.g., 'plan a 3 days 2 nights trip', 'make a
     - 'day': An integer for the day number in the itinerary (e.g., 1 for Day 1).
     - 'time_of_day': A string like 'morning', 'afternoon', or 'evening'.
     - 'address': (Optional) If the user provides an address for a custom location not widely known in Da Nang, include it. Otherwise, omit.
-- If the user wants to ADJUST an existing plan (e.g., "add Marble Mountains to my current plan for day 2 morning", "change my plan to include Con Market on day 1 afternoon"):
-    - You should still use the 'plan_da_nang_trip' tool.
-    - Provide the original or intended 'travel_duration'.
-    - Formulate a NEW list of 'user_specified_stops' that includes ALL desired stops (both old ones to keep, if any, and new ones to add/change). The tool does not remember past specified stops from previous calls; you must provide the complete list of desired specific stops each time you want them considered.
-- IMPORTANT: After a successful call to 'plan_da_nang_trip', the subsequent ToolMessage will contain the full plan details (base plan, user specified stops, notes) as a JSON string.
+- If the user wants to ADJUST an existing plan (e.g., "add Marble Mountains to my current plan for day 2 morning", "change my plan to include Con Market on day 1 afternoon instead of X", "I want to go to Han Market on day 1 afternoon"):
+    - You have a current travel plan. The details of this plan (travel duration, and the schedule of activities) are available in the `ToolMessage` from the most recent successful 'plan_da_nang_trip' tool call. This `ToolMessage` contains a JSON string with `travel_duration_requested`, `base_plan` (which includes `daily_plans` detailing `planned_stops` for each `day` and `time_of_day`), and `user_specified_stops` (the list that was input to that tool call).
+    - Identify the user's specific change: `requested_place_name`, `requested_day_number` (integer), and `requested_time_of_day` (e.g., 'morning', 'afternoon', 'evening'). Determine if it's an addition or a replacement for the targeted slot.
+
+    - You MUST call the 'plan_da_nang_trip' tool for any adjustment.
+    - **WHEN CALLING 'plan_da_nang_trip' FOR ANY ADJUSTMENT/MODIFICATION, YOUR ARGUMENTS MUST BE AS FOLLOWS:**
+        - **1. `user_intention` (MANDATORY FOR MODIFICATIONS): You ABSOLUTELY MUST include the argument `user_intention: "modify"`. This is the ONLY way the system knows to modify the current plan. If this argument is set to "create" or omitted, a new plan will be generated, which is INCORRECT for a modification request.**
+        - **2. `travel_duration`**: Extract this from the `travel_duration_requested` field within the parsed JSON of the previous plan's `ToolMessage`.
+        - **3. `user_specified_stops` (PROVIDE ONLY THE CHANGE):** This argument should now ONLY contain a list with the single specific stop (or multiple stops if the user requests several distinct changes in one go) that the user is currently explicitly requesting to change or add.
+            - For example, if the user says "I want to go to Han Market on day 1 afternoon", your `user_specified_stops` argument should be: `[{'name': 'Han Market', 'day': 1, 'time_of_day': 'afternoon'}]`.
+            - If the user says "Replace Con Market with Dragon Bridge on Day 2 morning", it would be `[{'name': 'Dragon Bridge', 'day': 2, 'time_of_day': 'morning'}]`.
+            - **DO NOT try to include any other stops from the previous plan in this list.** The agent system will handle merging this specific change with the existing plan.
+        - **4. `existing_plan_json` (DO NOT PROVIDE FOR MODIFICATIONS): You MUST NOT include the `existing_plan_json` argument in your tool call when `user_intention: "modify"` is set. The agent system will automatically load the current plan from its memory. Providing `existing_plan_json` here will be ignored or may cause errors.**
+
+- IMPORTANT: After a successful call to 'plan_da_nang_trip', the subsequent ToolMessage will contain the full plan details (base_plan, user_specified_stops from your input, notes) as a JSON string.
   Your response to the user MUST clearly manage expectations based on this JSON data:
   1. Present the `base_plan` day by day as suggested by the automated planner.
   2. If `user_specified_stops` are present in the JSON, list them clearly, stating what was requested (name, day, time).
@@ -407,7 +417,7 @@ Respond only with the single word 'continue' or 'end'."""
 
         # Updated intent prompt to guide flight selection queries better
         intent_prompt_text = """Given the user query (which is relevant to Da Nang travel), classify the primary intent:
-- 'plan_agent': User wants a travel plan/itinerary for Da Nang (e.g., 'plan a 3 day trip to Da Nang', 'make an itinerary').
+- 'plan_agent': User wants to create a NEW travel plan/itinerary for Da Nang (e.g., 'plan a 3 day trip to Da Nang', 'make an itinerary') OR wants to MODIFY an EXISTING travel plan (e.g., 'change my plan to include X', 'add Y to day 1 morning', 'can you replace Z on day 2 afternoon with W?', 'I want to go to Fahasa bookstore instead of the current evening activity on day 2').
 - 'flight_agent': User is asking about flights, potentially to or from Da Nang (e.g., 'flights from Hanoi?', 'show flights on date', 'book a flight from Saigon?', 'select the first flight', 'the one at 9pm').
 - 'information_agent': User is asking a question likely requiring external, up-to-date information about Da Nang (weather, opening hours, specific events, prices) that isn't about flights or planning.
 - 'retrieve_information': User is asking to see information the assistant has previously provided or confirmed, like a booked flight, the list of available flights shown earlier, or the current travel plan (e.g., 'show me my booked flight', 'what were those flights again?', 'can I see the plan?').
@@ -694,6 +704,45 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', 'retrieve_i
                 tool_to_use = self.tools[tool_name]
                 raw_result = None
                 try:
+                    # --- MODIFICATION FOR PLANNER TOOL ---
+                    if tool_name == self.planner_tool.name:
+                        attempting_modification = False
+                        # Check for explicit modification intent first
+                        if tool_args.get('user_intention') == "modify":
+                            attempting_modification = True
+                            print(f"Planner modification: 'user_intention' is 'modify'. Proceeding with state injection.")
+                        # Heuristic: if LLM forgets user_intention='modify' but provides existing_plan_json AND we have a plan in state
+                        elif tool_args.get('user_intention') != "create" and 'existing_plan_json' in tool_args and current_information.get('current_trip_plan'):
+                            attempting_modification = True
+                            print(f"Planner modification HEURISTIC: LLM provided 'existing_plan_json' (and intent was not explicitly 'create') and state has a plan. Forcing state injection.")
+
+                        if attempting_modification:
+                            # Pop whatever existing_plan_json the LLM might have sent (could be bad/truncated)
+                            if 'existing_plan_json' in tool_args:
+                                print(f"Popping 'existing_plan_json' from LLM-provided args (length: {len(tool_args['existing_plan_json']) if tool_args.get('existing_plan_json') else 0}).")
+                                tool_args.pop('existing_plan_json', None)
+                            
+                            current_plan_from_state = current_information.get('current_trip_plan')
+                            if current_plan_from_state and isinstance(current_plan_from_state, dict):
+                                try:
+                                    tool_args['existing_plan_json'] = json.dumps(current_plan_from_state)
+                                    print(f"Successfully serialized and injected existing plan from state into tool_args. Length: {len(tool_args['existing_plan_json'])}")
+                                except Exception as e:
+                                    print(f"Error serializing current_trip_plan from state: {e}. Setting existing_plan_json to None.")
+                                    tool_args['existing_plan_json'] = None 
+                            else:
+                                print("Warning: Modification attempt, but no valid 'current_trip_plan' in state. Setting existing_plan_json to None.")
+                                tool_args['existing_plan_json'] = None
+                            
+                        # Always remove user_intention from tool_args if it was present, 
+                        # as the plan_da_nang_trip_tool function itself doesn't use it directly for its core logic.
+                        # Its behavior is driven by the presence/absence of existing_plan_json.
+                        if 'user_intention' in tool_args:
+                            print(f"Removing 'user_intention' from tool_args before calling the tool. Value was: {tool_args['user_intention']}")
+                            tool_args.pop('user_intention', None)
+                        
+                        print(f"Planner logic complete. Final tool_args keys for tool call: {list(tool_args.keys())}")
+                    
                     if isinstance(tool_args, dict):
                         raw_result = tool_to_use.invoke(tool_args)
                     else:

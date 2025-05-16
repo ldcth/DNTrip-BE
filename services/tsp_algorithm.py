@@ -303,7 +303,7 @@ def find_or_create_place_details(stop_spec, must_visit_places_list, all_restaura
         "type": "place" # Default type, could be 'custom_place'
     }
 
-def optimize_distance_tour(travel_duration_str, user_specified_stops=None): # Renamed arg for clarity
+def optimize_distance_tour(travel_duration_str, user_specified_stops_for_modification=None, previous_base_plan_data=None):
     travel_duration_days = process_travel_duration(travel_duration_str)
     if travel_duration_days is None or travel_duration_days <= 0:
         return {"error": "Invalid travel duration provided."}
@@ -312,251 +312,218 @@ def optimize_distance_tour(travel_duration_str, user_specified_stops=None): # Re
     location_hotel_list = get_location_hotel()
     if not location_hotel_list:
         return {"error": "Itinerary generation failed: No hotel data."}
-    location_hotel = location_hotel_list[0]
-    hotel_name = location_hotel["place"]
-    hotel_coords = tuple(location_hotel["location"])
-    print(f"Selected Hotel: {hotel_name} at {hotel_coords}") 
+    
+    # --- Hotel Handling: Use from previous plan if available and valid, otherwise pick new ---
+    hotel_name = None
+    hotel_coords = None
+    hotel_description = "Default hotel description."
+
+    if previous_base_plan_data and isinstance(previous_base_plan_data.get('hotel'), dict):
+        prev_hotel = previous_base_plan_data['hotel']
+        if prev_hotel.get('name') and isinstance(prev_hotel.get('coords'), list) and len(prev_hotel['coords']) == 2:
+            try:
+                hotel_name = prev_hotel['name']
+                hotel_coords = (float(prev_hotel['coords'][0]), float(prev_hotel['coords'][1]))
+                hotel_description = prev_hotel.get('description', f"Accommodation: {hotel_name}")
+                print(f"Using hotel from previous plan: {hotel_name} at {hotel_coords}")
+            except ValueError:
+                print("Warning: Could not parse coordinates from previous hotel. Selecting a new one.")
+                hotel_coords = None # Fallback to selecting new hotel
+        else:
+            print("Warning: Previous hotel data incomplete. Selecting a new one.")
+    
+    if not hotel_coords: # If not set from previous plan or if previous was invalid
+        selected_hotel_info = location_hotel_list[0]
+        hotel_name = selected_hotel_info["place"]
+        hotel_coords = tuple(selected_hotel_info["location"]) # Ensure it's a tuple
+        hotel_description = selected_hotel_info.get("description", f"Accommodation: {hotel_name}")
+        print(f"Selected New Hotel: {hotel_name} at {hotel_coords}")
 
     must_visit_places = get_must_visit_places()
     restaurants = get_restaurants()
 
-    # --- Process user_specified_stops into a quick lookup map ---
+    # --- Process user_specified_stops_for_modification (these are the DELTAS/OVERRIDES) ---    
+    # These stops will directly replace or be added, taking precedence.
     # Map: { (day_number, time_slot_str_lower): [list_of_stop_specs_as_dicts] }
-    fixed_stops_map = {}
-    print(f"DEBUG TSP: Initial user_specified_stops received by optimize_distance_tour: {user_specified_stops}") # DEBUG
-    if user_specified_stops: # user_specified_stops is list of dicts or objects from the tool
-        for stop_item_idx, stop_item in enumerate(user_specified_stops): # Renamed from stop_spec_dict for clarity
-            print(f"DEBUG TSP: Processing stop_item #{stop_item_idx}: {stop_item}") # DEBUG
+    modification_stops_map = {}
+    print(f"DEBUG TSP: User specified stops for modification (deltas): {user_specified_stops_for_modification}")
+    if user_specified_stops_for_modification:
+        for stop_item_idx, stop_item in enumerate(user_specified_stops_for_modification):
             try:
-                stop_data_to_store = {}
-                day_val_raw = None # For debugging
-                if isinstance(stop_item, dict):
-                    day_val_raw = stop_item['day']
-                    print(f"DEBUG TSP: stop_item is dict. Raw day value: '{day_val_raw}' (type: {type(day_val_raw)})") # DEBUG
-                    day_key = int(day_val_raw)
-                    time_key = stop_item['time_of_day'].lower()
-                    stop_data_to_store = stop_item # Already a dict
-                else: # Assume it's a Pydantic-like object
-                    day_val_raw = stop_item.day
-                    print(f"DEBUG TSP: stop_item is object. Raw day value: '{day_val_raw}' (type: {type(day_val_raw)})") # DEBUG
-                    day_key = int(day_val_raw)
-                    time_key = stop_item.time_of_day.lower()
-                    # Convert object to dict for consistent storage and usage
-                    stop_data_to_store = {
-                        'name': stop_item.name,
-                        'day': stop_item.day,
-                        'time_of_day': stop_item.time_of_day,
-                        'address': getattr(stop_item, 'address', None)
-                    }
-                    # Handle location if the object has lat/lon attributes or a get_location_coordinates method
-                    if hasattr(stop_item, 'get_location_coordinates'):
-                        coords = stop_item.get_location_coordinates()
-                        if coords:
-                            stop_data_to_store['location'] = coords
-                    elif hasattr(stop_item, 'latitude') and hasattr(stop_item, 'longitude') and \
-                         stop_item.latitude is not None and stop_item.longitude is not None:
-                        stop_data_to_store['location'] = (stop_item.latitude, stop_item.longitude)
-                
+                day_key = int(stop_item['day'])
+                time_key = stop_item['time_of_day'].lower()
                 map_key = (day_key, time_key)
-                print(f"DEBUG TSP: stop_item #{stop_item_idx} - Derived day_key: {day_key}, time_key: {time_key}. map_key for fixed_stops_map: {map_key}") # DEBUG
-                if map_key not in fixed_stops_map:
-                    fixed_stops_map[map_key] = []
-                fixed_stops_map[map_key].append(stop_data_to_store) # Store the dictionary
-            except (KeyError, ValueError, AttributeError, TypeError) as e: # Catch more potential errors
-                print(f"Warning DEBUG TSP: Skipping invalid user_specified_stop (item #{stop_item_idx}: {stop_item}) due to parsing error: {e}") # DEBUG
+                if map_key not in modification_stops_map:
+                    modification_stops_map[map_key] = []
+                modification_stops_map[map_key].append(stop_item) # stop_item is already a dict
+            except (KeyError, ValueError, TypeError) as e:
+                print(f"Warning DEBUG TSP: Skipping invalid modification stop (item #{stop_item_idx}: {stop_item}) due to parsing error: {e}")
                 continue
-    print(f"DEBUG TSP: Final fixed_stops_map after processing all user stops: {fixed_stops_map}") # DEBUG
+    print(f"DEBUG TSP: Modification stops map (deltas processed): {modification_stops_map}")
 
-    # --- Initialize Sets for Uniqueness Tracking ---
-    selected_places_ever = set() # Tracks LOWERCASE names of places/restaurants to ensure variety
-    # selected_restaurants_ever = set() # This can be merged into selected_places_ever if restaurants are also places
-
-    # Add user-specified places to selected_places_ever to prevent re-selection by select_places
-    if user_specified_stops:
-        for stop_spec_dict in user_specified_stops: # This loop might be redundant if fixed_stops_map is primary source
-                                                    # Or it should iterate over the processed dicts in fixed_stops_map values.
-                                                    # For now, ensure it safely accesses 'name'.
-            place_name = None
-            if isinstance(stop_spec_dict, dict):
-                place_name = stop_spec_dict.get('name')
-            elif hasattr(stop_spec_dict, 'name'):
-                place_name = stop_spec_dict.name
-            
-            if isinstance(place_name, str):
-                selected_places_ever.add(place_name.lower())
-
+    # --- Initialize Sets for Uniqueness Tracking --- 
+    # This set will track all places chosen (from previous plan, from modifications, or newly selected)
+    # to ensure variety if new places need to be auto-selected.
+    selected_places_ever = set()
 
     # --- Initialize Result Structure --- 
     itinerary_result = {
-        "hotel": {"name": hotel_name, "coords": hotel_coords, "description": location_hotel["description"]},
+        "hotel": {"name": hotel_name, "coords": list(hotel_coords), "description": hotel_description},
         "daily_plans": []
     }
-    print(f"DEBUG TSP: Entering daily planning loop. fixed_stops_map to be used: {fixed_stops_map}") # DEBUG
 
     # --- 2. Loop Through Days ---    
     for day_index in range(travel_duration_days):
         current_day_number = day_index + 1
-        print(f"DEBUG TSP: --- Starting Day {current_day_number} of {travel_duration_days} ---") # DEBUG
+        print(f"DEBUG TSP: --- Starting Day {current_day_number} of {travel_duration_days} ---")
         day_data = {
             "day": current_day_number,
             "planned_stops": {}, # Will store lists of place names for each slot
             "route": []
         }
         
-        # This will store the actual place/restaurant objects for the day's plan
         daily_plan_items_by_slot = {} 
-        
-        # --- 3. Select Locations for the Day (Incorporating User Stops) ---
-        
-        # MORNING
-        morning_stops_key = (current_day_number, 'morning')
-        user_morning_stop_specs = fixed_stops_map.get(morning_stops_key, [])
-        print(f"DEBUG TSP: Day {current_day_number} Morning - Lookup key for fixed_stops_map: {morning_stops_key}. Found user_morning_stop_specs: {user_morning_stop_specs}") # DEBUG
-        morning_places_for_day = []
-        if user_morning_stop_specs:
-            for stop_spec_dict in user_morning_stop_specs: # stop_spec_dict is now guaranteed to be a dict
-                place_detail = find_or_create_place_details(stop_spec_dict, must_visit_places, restaurants)
-                morning_places_for_day.append(place_detail)
-                if isinstance(place_detail.get('place'), str): # Add to tracker
-                    selected_places_ever.add(place_detail['place'].lower()) 
-        else:
-            # If user didn't specify for this slot, pick one automatically
-            morning_places_for_day = select_places(must_visit_places, 'morning', 1, selected_places_ever)
-            for p in morning_places_for_day: 
-                if isinstance(p.get('place'), str):
-                    selected_places_ever.add(p['place'].lower())
-        daily_plan_items_by_slot['Morning'] = morning_places_for_day
 
-        # LUNCH
-        # Assuming user doesn't specify lunch restaurants via 'user_specified_stops' in this iteration.
-        # If they could, similar logic to MORNING would apply.
-        # For now, restaurants are chosen by select_restaurants.
-        # We need to ensure user-specified places (if they happen to be restaurants) are not re-selected.
-        lunch_stops_key = (current_day_number, 'lunch')
-        user_lunch_stop_specs = fixed_stops_map.get(lunch_stops_key, []) # Will be list of dicts
-        print(f"DEBUG TSP: Day {current_day_number} Lunch - Lookup key for fixed_stops_map: {lunch_stops_key}. Found user_lunch_stop_specs: {user_lunch_stop_specs}") # DEBUG
-        lunch_restaurants_for_day = []
-        if user_lunch_stop_specs:
-            for stop_spec_dict in user_lunch_stop_specs: # stop_spec_dict is a dict
-                place_detail = find_or_create_place_details(stop_spec_dict, must_visit_places, restaurants)
-                place_detail['type'] = 'restaurant'
-                lunch_restaurants_for_day.append(place_detail)
-                if isinstance(place_detail.get('place'), str):
-                    selected_places_ever.add(place_detail['place'].lower()) 
-        else:
-            lunch_restaurants_for_day = select_restaurants(restaurants, 1, selected_places_ever) # Pass selected_places_ever
-            for r in lunch_restaurants_for_day: 
-                if isinstance(r.get('place'), str):
-                    selected_places_ever.add(r['place'].lower())
-        daily_plan_items_by_slot['Lunch'] = lunch_restaurants_for_day
+        # --- 3. Select Locations for the Day (Incorporating Modifications and Previous Plan) ---
+        time_slots_of_day = ['morning', 'lunch', 'afternoon', 'dinner', 'evening'] # Define order
 
+        for time_slot_lower in time_slots_of_day:
+            current_slot_key = (current_day_number, time_slot_lower)
+            slot_places_for_day = []
+            slot_already_filled_by_modification = False
 
-        # AFTERNOON
-        afternoon_stops_key = (current_day_number, 'afternoon')
-        user_afternoon_stop_specs = fixed_stops_map.get(afternoon_stops_key, []) # Will be list of dicts
-        print(f"DEBUG TSP: Day {current_day_number} Afternoon - Lookup key for fixed_stops_map: {afternoon_stops_key}. Found user_afternoon_stop_specs: {user_afternoon_stop_specs}") # DEBUG
-        afternoon_places_for_day = []
-        if user_afternoon_stop_specs:
-            for stop_spec_dict in user_afternoon_stop_specs: # stop_spec_dict is a dict
-                place_detail = find_or_create_place_details(stop_spec_dict, must_visit_places, restaurants)
-                afternoon_places_for_day.append(place_detail)
-                if isinstance(place_detail.get('place'), str):
-                    selected_places_ever.add(place_detail['place'].lower())
-        else:
-            afternoon_places_for_day = select_places(must_visit_places, 'afternoon', 1, selected_places_ever)
-            for p in afternoon_places_for_day: 
-                if isinstance(p.get('place'), str):
-                    selected_places_ever.add(p['place'].lower())
-        daily_plan_items_by_slot['Afternoon'] = afternoon_places_for_day
-        
-        # DINNER
-        dinner_stops_key = (current_day_number, 'dinner')
-        user_dinner_stop_specs = fixed_stops_map.get(dinner_stops_key, []) # Will be list of dicts
-        print(f"DEBUG TSP: Day {current_day_number} Dinner - Lookup key for fixed_stops_map: {dinner_stops_key}. Found user_dinner_stop_specs: {user_dinner_stop_specs}") # DEBUG
-        dinner_restaurants_for_day = []
-        if user_dinner_stop_specs:
-            for stop_spec_dict in user_dinner_stop_specs: # stop_spec_dict is a dict
-                place_detail = find_or_create_place_details(stop_spec_dict, must_visit_places, restaurants)
-                place_detail['type'] = 'restaurant'
-                dinner_restaurants_for_day.append(place_detail)
-                if isinstance(place_detail.get('place'), str):
-                    selected_places_ever.add(place_detail['place'].lower())
-        else:
-            dinner_restaurants_for_day = select_restaurants(restaurants, 1, selected_places_ever)
-            for r in dinner_restaurants_for_day: 
-                if isinstance(r.get('place'), str):
-                    selected_places_ever.add(r['place'].lower())
-        daily_plan_items_by_slot['Dinner'] = dinner_restaurants_for_day
-       
-        # EVENING
-        evening_stops_key = (current_day_number, 'evening')
-        user_evening_stop_specs = fixed_stops_map.get(evening_stops_key, []) # Will be list of dicts
-        print(f"DEBUG TSP: Day {current_day_number} Evening - Lookup key for fixed_stops_map: {evening_stops_key}. Found user_evening_stop_specs: {user_evening_stop_specs}") # DEBUG
-        evening_places_for_day = []
-        if user_evening_stop_specs:
-            for stop_spec_dict in user_evening_stop_specs: # stop_spec_dict is a dict
-                place_detail = find_or_create_place_details(stop_spec_dict, must_visit_places, restaurants)
-                evening_places_for_day.append(place_detail)
-                if isinstance(place_detail.get('place'), str):
-                    selected_places_ever.add(place_detail['place'].lower())
-        else:
-            evening_count = random.randint(1, 2) # Original logic for multiple evening places
-            evening_places_for_day = select_places(must_visit_places, 'evening', evening_count, selected_places_ever)
-            for p in evening_places_for_day: 
-                if isinstance(p.get('place'), str):
-                    selected_places_ever.add(p['place'].lower())
-        daily_plan_items_by_slot['Evening'] = evening_places_for_day
-        
+            # Priority 1: Apply direct modifications for this slot
+            if current_slot_key in modification_stops_map:
+                user_modification_stop_specs = modification_stops_map[current_slot_key]
+                print(f"DEBUG TSP: Day {current_day_number} {time_slot_lower.capitalize()} - Applying MODIFICATION: {user_modification_stop_specs}")
+                for stop_spec_dict in user_modification_stop_specs:
+                    place_detail = find_or_create_place_details(stop_spec_dict, must_visit_places, restaurants)
+                    if time_slot_lower in ['lunch', 'dinner']:
+                         place_detail['type'] = 'restaurant' # Ensure type if it's a meal slot
+                    slot_places_for_day.append(place_detail)
+                    if isinstance(place_detail.get('place'), str):
+                        selected_places_ever.add(place_detail['place'].lower())
+                slot_already_filled_by_modification = True # Mark as filled by explicit change
+            
+            # Priority 2: If not modified, try to preserve from previous base plan
+            if not slot_already_filled_by_modification and previous_base_plan_data:
+                # Find the corresponding day in previous_base_plan_data
+                prev_day_plan_data = next((dp for dp in previous_base_plan_data.get('daily_plans', []) if dp.get('day') == current_day_number), None)
+                if prev_day_plan_data and isinstance(prev_day_plan_data.get('planned_stops'), dict):
+                    # Time slot keys in stored planned_stops might be capitalized (e.g., 'Morning')
+                    # We need to find the right key, case-insensitively for robustness, or ensure consistency.
+                    # For now, assume keys in planned_stops are like 'Morning', 'Lunch' etc.
+                    # We need to map time_slot_lower (e.g. 'morning') to the key in prev_day_plan_data.planned_stops
+                    # This is brittle. Better: ensure keys are consistent or use a mapping.
+                    # Let's assume stored keys are Capitalized for now.
+                    time_slot_capitalized = time_slot_lower.capitalize()
+                    
+                    # More robust check for time slot key in previous plan
+                    prev_slot_name_found = None
+                    for k in prev_day_plan_data['planned_stops'].keys():
+                        if k.lower() == time_slot_lower:
+                            prev_slot_name_found = k
+                            break
+
+                    if prev_slot_name_found and prev_day_plan_data['planned_stops'].get(prev_slot_name_found):
+                        preserved_place_names = prev_day_plan_data['planned_stops'][prev_slot_name_found]
+                        print(f"DEBUG TSP: Day {current_day_number} {time_slot_lower.capitalize()} - Preserving from PREVIOUS plan: {preserved_place_names}")
+                        for place_name in preserved_place_names:
+                            # We need to reconstruct full place_detail for preserved items.
+                            # This requires looking them up in must_visit_places or restaurants, or creating a synthetic one.
+                            # We can use find_or_create_place_details by mocking a stop_spec.
+                            # For location, we need to find it in the previous plan's route if possible.
+                            mock_stop_spec = {'name': place_name, 'day': current_day_number, 'time_of_day': time_slot_lower}
+                            
+                            # Try to find location from previous plan's route for more accuracy
+                            prev_route_stop_info = None
+                            if prev_day_plan_data.get('route'):
+                                for r_stop in prev_day_plan_data['route']:
+                                    if r_stop.get('name') == place_name and r_stop.get('time_slot', '').lower() == time_slot_lower:
+                                        if isinstance(r_stop.get('coords'), list) and len(r_stop['coords']) == 2:
+                                            mock_stop_spec['location'] = tuple(r_stop['coords'])
+                                            # mock_stop_spec['address'] = r_stop.get('address') # if address was stored in route
+                                        break
+                            
+                            place_detail = find_or_create_place_details(mock_stop_spec, must_visit_places, restaurants)
+                            if time_slot_lower in ['lunch', 'dinner']:
+                                place_detail['type'] = 'restaurant' # Ensure type
+                            slot_places_for_day.append(place_detail)
+                            if isinstance(place_detail.get('place'), str):
+                                selected_places_ever.add(place_detail['place'].lower())
+            
+            # Priority 3: If slot is still empty (not modified, nothing to preserve or preserve failed), then auto-select.
+            if not slot_places_for_day: # If list is still empty
+                print(f"DEBUG TSP: Day {current_day_number} {time_slot_lower.capitalize()} - Slot empty, AUTO-SELECTING.")
+                if time_slot_lower == 'lunch':
+                    selected_items = select_restaurants(restaurants, 1, selected_places_ever)
+                elif time_slot_lower == 'dinner':
+                    selected_items = select_restaurants(restaurants, 1, selected_places_ever)
+                elif time_slot_lower == 'evening':
+                    evening_count = random.randint(1, 2)
+                    selected_items = select_places(must_visit_places, time_slot_lower, evening_count, selected_places_ever)
+                else: # Morning, Afternoon
+                    selected_items = select_places(must_visit_places, time_slot_lower, 1, selected_places_ever)
+                
+                slot_places_for_day.extend(selected_items)
+                for p_item in selected_items:
+                    if isinstance(p_item.get('place'), str):
+                        selected_places_ever.add(p_item['place'].lower())
+            
+            daily_plan_items_by_slot[time_slot_lower.capitalize()] = slot_places_for_day # Store with Capitalized key for consistency
+
         # --- 4. Populate Planned Stops (names) in Result --- 
-        for time_slot, items_list in daily_plan_items_by_slot.items():
-            day_data["planned_stops"][time_slot] = [item['place'] for item in items_list] # Store names
+        for time_slot_capitalized_key, items_list in daily_plan_items_by_slot.items():
+            day_data["planned_stops"][time_slot_capitalized_key] = [item['place'] for item in items_list]
             
         # --- 5. Generate Sequential Route and Populate in Result --- 
-        current_coords = hotel_coords
-        current_name = hotel_name
+        current_route_coords = hotel_coords # Start route from hotel for the day
+        # current_route_name = hotel_name
         step_counter = 0
         day_data["route"].append({
             "step": step_counter,
             "time_slot": "Start",
             "type": "hotel",
-            "name": current_name,
-            "coords": current_coords,
+            "name": hotel_name,
+            "coords": list(hotel_coords),
             "distance_from_previous_km": 0.0,
-            "description": location_hotel["description"]
+            "description": hotel_description
         })
 
-        for time_slot in ['Morning', 'Lunch', 'Afternoon', 'Dinner', 'Evening']:
-            items_for_slot = daily_plan_items_by_slot.get(time_slot, []) # Get list of item dicts
+        # Ensure consistent iteration order for route generation
+        # The daily_plan_items_by_slot keys are already Capitalized e.g. 'Morning'
+        ordered_time_slots_for_route = ['Morning', 'Lunch', 'Afternoon', 'Dinner', 'Evening']
+
+        for time_slot_key_for_route in ordered_time_slots_for_route:
+            items_for_slot = daily_plan_items_by_slot.get(time_slot_key_for_route, [])
                  
-            for item_dict in items_for_slot: # item_dict is the full place/restaurant detail
+            for item_dict in items_for_slot:
                 step_counter += 1
-                # Ensure location is a tuple of floats for Haversine
                 try:
                     next_coords_raw = item_dict["location"]
                     next_coords = (float(next_coords_raw[0]), float(next_coords_raw[1]))
                 except (TypeError, ValueError, IndexError):
-                    print(f"Warning: Invalid coordinates for {item_dict['place']} in routing: {item_dict.get('location')}. Using (0,0).")
-                    next_coords = (0.0, 0.0) # Fallback for routing if coords are bad
+                    print(f"Warning: Invalid coordinates for {item_dict['place']} in routing: {item_dict.get('location')}. Using fallback (0,0).")
+                    next_coords = (0.0, 0.0)
 
                 next_name = item_dict["place"]
-                distance_km = haversine(current_coords, next_coords)
+                distance_km = haversine(current_route_coords, next_coords)
                 
                 route_stop_data = {
                     "step": step_counter,
-                    "time_slot": time_slot,
+                    "time_slot": time_slot_key_for_route, # Use the capitalized key for time_slot
                     "name": next_name,
-                    "coords": list(next_coords), # Store as list in JSON
+                    "coords": list(next_coords),
                     "distance_from_previous_km": round(distance_km, 2),
-                    "description": item_dict.get("description", f"Visit to {next_name}") # Use the description from item_dict
+                    "description": item_dict.get("description", f"Visit to {next_name}")
                 }
-                # Determine type based on item_dict, or default
                 route_stop_data["type"] = item_dict.get("type", "place") 
-                # if time_slot in ['Lunch', 'Dinner'] and route_stop_data["type"] != 'restaurant':
-                #     route_stop_data["type"] = "restaurant" # Override if it's a meal slot but type isn't set
+                if time_slot_key_for_route in ['Lunch', 'Dinner'] and route_stop_data["type"] != 'restaurant':
+                     route_stop_data["type"] = "restaurant"
 
                 day_data["route"].append(route_stop_data)
-                current_coords = next_coords
-                current_name = next_name
+                current_route_coords = next_coords
+                # current_route_name = next_name # Not strictly needed here
         
         itinerary_result["daily_plans"].append(day_data)
             
@@ -580,7 +547,7 @@ def test_optimize_distance_tour():
     # The 'location' key in specific_stops_test is what the tool layer should ideally provide if it can geocode.
     # If 'location' is missing or None for a custom stop, find_or_create_place_details will use (0,0).
     
-    full_plan_with_specific = optimize_distance_tour('2 days', user_specified_stops=specific_stops_test)
+    full_plan_with_specific = optimize_distance_tour('2 days', user_specified_stops_for_modification=specific_stops_test)
     print("\n--- Generated Itinerary Data (WITH Specific Stops) ---")
     print(json.dumps(full_plan_with_specific, indent=2, ensure_ascii=False))
     print("--- End Test ---")
