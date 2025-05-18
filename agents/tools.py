@@ -86,40 +86,48 @@ def plan_da_nang_trip_tool(travel_duration: str, user_intention: str = "create",
 
     output: Dict[str, Any] = {
         "travel_duration_requested": travel_duration,
-        "base_plan": None,
+        "base_plan": None, # Will be populated by result['plan']
         "user_specified_stops": serialized_current_user_stops, # Reflects stops for THIS call
-        "notes": []
+        "notes": [] # Will include messages from the optimizer
     }
 
     try:
         # Pass the parsed_existing_base_plan and the current user_specified_stops (as deltas/overrides)
         # to the optimizer. The optimizer will handle merging/preserving.
-        base_plan_result = optimize_distance_tour(
+        optimizer_result = optimize_distance_tour(
             travel_duration_str=travel_duration,
             user_specified_stops_for_modification=serialized_current_user_stops, # These are the new/changed stops
             previous_base_plan_data=parsed_existing_base_plan     # This is the plan to preserve/modify
         )
-        output["base_plan"] = base_plan_result
         
-        if parsed_existing_base_plan and serialized_current_user_stops:
-            output["notes"].append("The existing travel plan was modified with your requested changes.")
-        elif parsed_existing_base_plan:
-            output["notes"].append("The existing travel plan was loaded. No new specific modifications were requested in this call, so it should largely reflect the previous plan.")
-        elif serialized_current_user_stops:
-            output["notes"].append("A new travel plan has been generated incorporating your specified stops.")
-        else:
-            output["notes"].append("A new base travel plan has been generated for the specified duration.")
+        # The optimizer_result is now a dict like {"plan": ..., "message": ...}
+        output["base_plan"] = optimizer_result.get("plan") # This can be None if validation failed
+        optimizer_message = optimizer_result.get("message", "Optimizer did not return a message.")
+        output["notes"].append(f"Planner Message: {optimizer_message}")
 
-
-        if user_specified_stops: # Check original Pydantic objects for specific stop notes
+        # Add general notes based on the outcome
+        if output["base_plan"] is not None and "Successfully" in optimizer_message:
+            if parsed_existing_base_plan and serialized_current_user_stops:
+                output["notes"].append("Context: The existing travel plan was modified with your requested changes, provided they were valid.")
+            elif parsed_existing_base_plan:
+                output["notes"].append("Context: The existing travel plan was loaded. If no new specific modifications were requested or if modifications were invalid, it should reflect the previous plan.")
+            elif serialized_current_user_stops:
+                output["notes"].append("Context: A new travel plan has been generated, incorporating your specified stops if they were valid.")
+            else:
+                output["notes"].append("Context: A new base travel plan has been generated.")
+        elif "Cannot" in optimizer_message or output["base_plan"] is None: # Indicates a failure in planning/modification due to invalid stop
+            output["notes"].append("Action: Please review the planner message. You may need to provide a valid location in Da Nang or correct the stop details.")
+        
+        # Notes about user_specified_stops for this call (these are what the user *asked* for in this turn)
+        if user_specified_stops: 
             output["notes"].append(
-                "Your specified stops for this request have been noted. "
-                "If this was a modification, they have been applied to the existing plan. "
-                "For custom locations, details depend on the information you provided."
+                f"User Requests This Turn: {len(user_specified_stops)} specific stop(s) were requested. Their processing outcome is reflected in the Planner Message and the resulting plan (if any)."
             )
-            for stop in user_specified_stops:
-                if stop.address:
-                    output["notes"].append(f"Custom stop '{stop.name}' at address '{stop.address}' was processed. Its inclusion should be manually verified for location and timing if coordinates were not automatically found.")
+            for stop_idx, stop_obj in enumerate(user_specified_stops):
+                note = f"  - Request {stop_idx+1}: '{stop_obj.name}' for Day {stop_obj.day}, {stop_obj.time_of_day}."
+                if stop_obj.address:
+                    note += f" (Address provided: '{stop_obj.address}')"
+                output["notes"].append(note)
         
         return json.dumps(output, indent=2, ensure_ascii=False)
 

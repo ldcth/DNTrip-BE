@@ -57,8 +57,8 @@ If the user asks for a travel plan (e.g., 'plan a 3 days 2 nights trip', 'make a
     - 'time_of_day': A string like 'morning', 'afternoon', or 'evening'.
     - 'address': (Optional) If the user provides an address for a custom location not widely known in Da Nang, include it. Otherwise, omit.
 - If the user wants to ADJUST an existing plan (e.g., "add Marble Mountains to my current plan for day 2 morning", "change my plan to include Con Market on day 1 afternoon instead of X", "I want to go to Han Market on day 1 afternoon"):
-    - You have a current travel plan. The details of this plan (travel duration, and the schedule of activities) are available in the `ToolMessage` from the most recent successful 'plan_da_nang_trip' tool call. This `ToolMessage` contains a JSON string with `travel_duration_requested`, `base_plan` (which includes `daily_plans` detailing `planned_stops` for each `day` and `time_of_day`), and `user_specified_stops` (the list that was input to that tool call).
-    - Identify the user's specific change: `requested_place_name`, `requested_day_number` (integer), and `requested_time_of_day` (e.g., 'morning', 'afternoon', 'evening'). Determine if it's an addition or a replacement for the targeted slot.
+    - You have a current travel plan. The details of this plan (travel duration, and the schedule of activities) are available in the `ToolMessage` from the most recent successful 'plan_da_nang_trip' tool call. This `ToolMessage` contains a JSON string with `travel_duration_requested`, `base_plan` (which includes `daily_plans` detailing `planned_stops` for each `day` and `time_of_day`), and `user_specified_stops` (the list that was input to that tool call), and `notes` (which includes a crucial 'Planner Message').
+    - Identify the user's specific change: `requested_place_name`, `requested_day_number` (integer), and `requested_time_of_day` (e.g., 'morning', 'afternoon', 'evening').
 
     - You MUST call the 'plan_da_nang_trip' tool for any adjustment.
     - **WHEN CALLING 'plan_da_nang_trip' FOR ANY ADJUSTMENT/MODIFICATION, YOUR ARGUMENTS MUST BE AS FOLLOWS:**
@@ -70,14 +70,11 @@ If the user asks for a travel plan (e.g., 'plan a 3 days 2 nights trip', 'make a
             - **DO NOT try to include any other stops from the previous plan in this list.** The agent system will handle merging this specific change with the existing plan.
         - **4. `existing_plan_json` (DO NOT PROVIDE FOR MODIFICATIONS): You MUST NOT include the `existing_plan_json` argument in your tool call when `user_intention: "modify"` is set. The agent system will automatically load the current plan from its memory. Providing `existing_plan_json` here will be ignored or may cause errors.**
 
+
 - IMPORTANT: After a successful call to 'plan_da_nang_trip', the subsequent ToolMessage will contain the full plan details (base_plan, user_specified_stops from your input, notes) as a JSON string.
-  Your response to the user MUST clearly manage expectations based on this JSON data:
-  1. Present the `base_plan` day by day as suggested by the automated planner.
-  2. If `user_specified_stops` are present in the JSON, list them clearly, stating what was requested (name, day, time).
-  3. Refer to the `notes` section from the tool's JSON output. Based on these notes, you MUST explain that the `base_plan` is an automated suggestion.
-  4. Crucially, state that the user's specific requests (`user_specified_stops`) are NOT automatically integrated into the `base_plan`'s optimized route by the current planning algorithm. The `base_plan` is generated independently.
-  5. Advise the user that they should consider the `base_plan` as a starting point and may need to manually adjust it to incorporate their specific requests. For example: "Here's a suggested base itinerary. You also requested [X specific stop] for [Day Y, time]. Please note that the automated base plan is generated independently and doesn't dynamically incorporate your specific requests into its route. You may need to adjust this suggested plan to fit in [X specific stop] as desired. The base plan, for instance, suggests [mention what base plan has for that slot, if anything different]."
-  Make your overall response transparent and helpful, clearly delineating between the automated suggestion and the user's specific, noted requests.
+  Your response to the user MUST clearly manage expectations based on this JSON data.
+  Examine the `notes` array in the JSON output first. Look for a "Planner Message:". This message is CRITICAL.
+  Show message and not do anything else.
 
 If the user asks about flights (e.g., 'show me flights to Da Nang on date', 'find flights from Hanoi to Da Nang on date'):
 - First, ensure the user has provided both the ORIGIN CITY (e.g., 'Hanoi', 'Ho Chi Minh City') and the DEPARTURE DATE (e.g., 'May 12', '2025-05-12'). 
@@ -267,93 +264,105 @@ Respond only with the category name.""")
         return {'messages': [message]}
 
     def check_relevance(self, state: AgentState):
-        """Checks if the user query is related to Da Nang travel, considering recent conversation history."""
-        print("--- Checking Relevance (with history) ---")
-        
-        # ADDED DEBUG LOGGING
+        """Checks if the user query is related to Da Nang travel, considering recent history and stored info."""
+        print("--- Checking Relevance (with limited history & info) ---")
+
+        if not state['messages'] or not isinstance(state['messages'][-1], HumanMessage):
+            print("Error: No HumanMessage at the end of state for relevance check.")
+            return {"relevance_decision": "end"}
+
+        # --- Restore info_status ---
         information_at_relevance_check_start = state.get("information", {})
-        # Log keys and whether they have non-None/non-empty data
         info_status = {}
         for k, v in information_at_relevance_check_start.items():
             if isinstance(v, (list, dict)):
-                info_status[k] = f"len={len(v)}"
-            elif v is not None:
+                info_status[k] = f"len={len(v)}" if v else "empty" # Clarify empty lists/dicts
+            elif v is not None and v != False: # Check for False boolean
                 info_status[k] = "present"
             else:
                 info_status[k] = "empty/None"
         print(f"DEBUG: information status at start of check_relevance: {info_status}")
+        # --- End restore info_status ---
 
-        # Prepare the full information state as a string for the LLM prompt
-        info_state_string = "Current relevant information stored: " + (
-            json.dumps(information_at_relevance_check_start, indent=2, ensure_ascii=False) 
-            if information_at_relevance_check_start 
-            else "None"
-        )
-        # Limit string length for prompt to avoid excessive size
-        MAX_INFO_STRING_LEN = 1000 
-        if len(info_state_string) > MAX_INFO_STRING_LEN:
-            info_state_string = info_state_string[:MAX_INFO_STRING_LEN] + "... (truncated due to length)"
+        # --- Restore history processing ---
+        HISTORY_CONTEXT_SIZE = 5  # Use a moderate history size
 
-        # Define how many recent messages to include as context (includes the current user message)
-        HISTORY_CONTEXT_SIZE = 5 
-
-        if not state['messages']:
-            print("Error: No messages in state for relevance check.")
-            return {"relevance_decision": "end"}
-
-        current_user_message_for_logging = state['messages'][-1]
+        current_user_message_for_logging = state['messages'][-1] # This is latest_user_query_message
         start_index = max(0, len(state['messages']) - HISTORY_CONTEXT_SIZE)
         history_selection_for_llm = state['messages'][start_index:]
 
+        # Ensure we don't start with ToolMessages if possible, but include the HumanMessage
         first_valid_idx = 0
         if history_selection_for_llm:
+            # Find the first non-ToolMessage to start, or the last message if all are tools (edge case)
+            # More robustly, ensure the last message (HumanMessage) is always included if it's the only one.
             for idx, msg in enumerate(history_selection_for_llm):
                 if not isinstance(msg, ToolMessage):
                     first_valid_idx = idx
                     break
-                if idx == len(history_selection_for_llm) - 1 and isinstance(msg, ToolMessage):
-                    first_valid_idx = len(history_selection_for_llm)
-        processed_history_for_llm = history_selection_for_llm[first_valid_idx:]
+            # If all initial messages in selection are tools, but human message is last one
+            if first_valid_idx == len(history_selection_for_llm) -1 and isinstance(history_selection_for_llm[first_valid_idx], ToolMessage):
+                 pass # Let it proceed, it will just be the human message after this loop
+            
+            processed_history_for_llm = history_selection_for_llm[first_valid_idx:]
+        else: # Should not happen due to check at the start
+            processed_history_for_llm = [current_user_message_for_logging]
 
-        if not processed_history_for_llm and isinstance(state['messages'][-1], HumanMessage):
-            processed_history_for_llm = [state['messages'][-1]]
+
+        # If after processing, it's empty (e.g. history was all ToolMessages and then removed)
+        # ensure the current human message is there.
+        if not processed_history_for_llm and isinstance(current_user_message_for_logging, HumanMessage):
+            processed_history_for_llm = [current_user_message_for_logging]
+        # --- End restore history processing ---
+
 
         relevance_prompt_system_message = SystemMessage(
-            content=f"""Analyze the provided conversation history (if any), the LATEST user query, AND the currently stored information.
-Currently Stored Information: 
-```json
-{info_status}
-```
-(This shows the full data like 'available_flights', 'confirmed_booking_details', or 'current_trip_plan' currently in memory. It might be truncated if very large.)
+            content="""Your primary task is to determine if the LATEST USER QUERY (the last message in the provided history) is relevant to Da Nang travel.
 
-Your goal is to determine if the LATEST USER QUERY is relevant to Da Nang travel, considering the conversation context and stored information.
+You are given:
+1.  The LATEST USER QUERY (as the last message in the history).
+2.  A limited recent CONVERSATION HISTORY leading up to the query.
+3.  A SUMMARY OF STORED INFORMATION (e.g., if a plan or flights are already in memory).
 
-Specifically, the LATEST USER QUERY IS RELEVANT (respond 'continue') if it:
-1. Directly asks about travel IN or TO Da Nang, Vietnam (e.g., planning, flights, attractions, general info or weather about Da Nang).
-2. Is a direct response to a question the assistant just asked.
-3. Is an action or selection related to options the assistant just presented.
-4. Is a request to recall, review, or see information previously stored or confirmed (e.g., 'show my booked flight', 'what was the plan?').
-5. Relates directly to the data shown in the 'Currently Stored Information' above.
+Stored Information Summary: {info_status}
 
-The LATEST USER QUERY IS NOT RELEVANT (respond 'end') if it introduces a topic clearly outside of Da Nang travel AND is not a direct follow-up to an assistant's question, presented options, or the stored information.
+Instructions:
+-   Focus mainly on the LATEST USER QUERY.
+-   Use the CONVERSATION HISTORY to understand context (e.g., is this a follow-up question?).
+-   Use the STORED INFORMATION SUMMARY if the query seems to be about recalling this data (e.g., "show me the plan again").
 
-IMPORTANT: Your response MUST be ONLY the single word 'continue' or the single word 'end'. Do NOT provide any other text, explanation, or formatting.
-Respond only with the single word 'continue' or 'end'."""
+CRITERIA FOR RELEVANCE (if LATEST USER QUERY meets these, respond 'continue'):
+1.  Directly asks about travel IN or TO Da Nang (planning, flights, attractions, general info, weather).
+2.  Is a direct follow-up or clarification related to Da Nang travel from the CONVERSATION HISTORY.
+3.  Is an action/selection related to Da Nang travel options the assistant might have presented (check HISTORY).
+4.  Asks to recall/review Da Nang travel information (check STORED INFORMATION SUMMARY and HISTORY).
+
+CRITERIA FOR NON-RELEVANCE (if LATEST USER QUERY meets this, respond 'end'):
+-   Introduces a topic clearly outside Da Nang travel AND is not a direct follow-up or related to stored Da Nang travel data.
+
+Respond with ONLY ONE WORD: EITHER 'continue' OR 'end'. NO OTHER TEXT.
+Example for relevant: continue
+Example for not relevant: end
+"""
         )
 
         messages_for_llm = [relevance_prompt_system_message] + processed_history_for_llm
+        
         print(f"Messages for relevance check LLM (types): {[msg.type for msg in messages_for_llm]}")
+        # Use current_user_message_for_logging for consistency in logging the query content
+        print(f"Latest user query for relevance: '{current_user_message_for_logging.content[:100]}...'")
+
 
         try:
             response = self.router_llm.invoke(messages_for_llm)
             decision = response.content.strip().lower()
-            # Use current_user_message_for_logging for logging the query content itself
-            print(f"Relevance check for query '{str(current_user_message_for_logging.content)[:50]}...' (with history): {decision}")
+            # Log using current_user_message_for_logging for the query content
+            print(f"Relevance check for query '{str(current_user_message_for_logging.content)[:50]}...': {decision}")
             if decision not in ["continue", "end"]:
                 print(f"Warning: Relevance check returned unexpected value: {decision}. Defaulting to 'end'.")
                 decision = "end"
         except Exception as e:
-            print(f"Error during relevance check (with history): {e}")
+            print(f"Error during relevance check (with history & info): {e}")
             traceback.print_exc()
             decision = "end"
 
@@ -1007,80 +1016,89 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', 'retrieve_i
 
             if current_turn_relevance == "end":
                 determined_intent = "not_related"
-                # Message is already from mark_not_related_node
+                # Message is already from mark_not_related_node, final_ai_message_content should reflect this.
+                response_data_for_payload["message"] = final_ai_message_content
             elif final_response_data_from_turn is not None:
                 # A tool in the *current turn* produced a definitive final output.
                 # Use the tool name to determine intent and add data.
                 if final_tool_name_from_turn == "confirmed_flight_selection":
                     determined_intent = "flight_selection_confirmed"
                     response_data_for_payload["selected_flight_details"] = final_response_data_from_turn
+                    # final_ai_message_content should be the LLM's confirmation based on the selected flight tool message.
+                    response_data_for_payload["message"] = final_ai_message_content 
                 elif final_tool_name_from_turn == 'plan_da_nang_trip':
-                    determined_intent = "plan_agent" # Or "plan_generated" / "plan_updated"
-                    # final_response_data_from_turn already contains the rich plan object
-                    # (base_plan, user_specified_stops, notes)
-                    response_data_for_payload["plan_details"] = final_response_data_from_turn
+                    determined_intent = "plan_agent" 
+                    response_data_for_payload["plan_details"] = final_response_data_from_turn # This is the rich plan object or error info
                     
-                    # Move the detailed LLM conversational summary into plan_details
-                    # and set a concise main message.
+                    planner_message_str = None
+                    if isinstance(final_response_data_from_turn, dict):
+                        notes = final_response_data_from_turn.get("notes", [])
+                        if isinstance(notes, list):
+                            for note in notes:
+                                if isinstance(note, str) and note.startswith("Planner Message:"):
+                                    planner_message_str = note.replace("Planner Message:", "").strip()
+                                    break
+                    response_data_for_payload["planner_message"] = planner_message_str # This sets the separate field for UI
+
+                    if planner_message_str is not None:
+                        # If a planner_message_str was extracted, use it directly as the main response message.
+                        response_data_for_payload["message"] = planner_message_str
+                    else:
+                        # Planner tool ran, but its specific "Planner Message:" note was not found in the notes.
+                        # Set a predefined, non-LLM message.
+                        response_data_for_payload["message"] = "The travel planner processed your request. Please review the plan details provided. A specific status message was not available in the notes."
+                        # final_ai_message_content (the LLM's conversational wrap-up) is deliberately NOT used here.
+                    
+                    # We no longer need a separate "conversational_summary" inside plan_details if the main message is correct.
                     if isinstance(response_data_for_payload["plan_details"], dict):
-                        response_data_for_payload["plan_details"]["conversational_summary"] = final_ai_message_content # The LLM's summary
-                    else: # Should not happen, plan_details should be a dict
-                        response_data_for_payload["plan_details"] = {"raw_data": final_response_data_from_turn, "conversational_summary": final_ai_message_content}
-                    
-                    # Set a concise message for the main response field
-                    response_data_for_payload["message"] = "I have prepared a travel plan for you. Please see the details."
+                        response_data_for_payload["plan_details"].pop("conversational_summary", None)
 
                 elif final_tool_name_from_turn == "flights_found_summary":
                     determined_intent = "flights_found_awaiting_selection"
-                    # Message is summary string, flights were stored in information *this turn*
-                    response_data_for_payload["flights"] = persistent_information.get('available_flights', []) # Use get for safety
+                    response_data_for_payload["flights"] = persistent_information.get('available_flights', []) 
+                    # final_ai_message_content should be the LLM's summary (e.g., "I found X flights...")
+                    response_data_for_payload["message"] = final_ai_message_content 
                 elif final_tool_name_from_turn in ["flights_not_found_summary", "flights_tool_error_or_message", "flights_tool_format_error", "flights_tool_processing_error"]:
                     determined_intent = "flight_search_direct_message"
-                    # Message is in final_response_data_from_turn.
-                elif final_tool_name_from_turn:
+                    # final_ai_message_content will be the LLM's response based on the tool message error.
+                    response_data_for_payload["message"] = final_ai_message_content
+                elif final_tool_name_from_turn: # Other generic tool results
                     determined_intent = "tool_result"
                     response_data_for_payload[f"{final_tool_name_from_turn}_data"] = final_response_data_from_turn
-                else:
+                    response_data_for_payload["message"] = final_ai_message_content # LLM summarizes the tool output
+                else: # Should not happen if final_response_data_from_turn is not None
                     determined_intent = "unknown_tool_result_with_data"
                     response_data_for_payload["data"] = final_response_data_from_turn
+                    response_data_for_payload["message"] = final_ai_message_content
             else:
                 # No direct tool output *this turn*. Determine intent based on graph flow.
+                # final_ai_message_content is the LLM's direct response or clarification question.
+                response_data_for_payload["message"] = final_ai_message_content
                 if current_turn_query_type in ["persona", "history"]:
                     determined_intent = "direct_answer"
                 elif current_turn_graph_intent == "retrieve_information":
                     determined_intent = "retrieve_information"
-                    # The retrieve_stored_information node set the final_tool_name_from_turn
-                    # Use that name to decide which data to potentially attach from persistent state
                     if final_tool_name_from_turn == "retrieved_flight_details" and persistent_information.get('confirmed_booking_details'):
                         response_data_for_payload["confirmed_flight_details"] = persistent_information['confirmed_booking_details']
                     elif final_tool_name_from_turn == "retrieved_available_flights" and persistent_information.get('available_flights'):
                         response_data_for_payload["flights"] = persistent_information['available_flights']
                     elif final_tool_name_from_turn == "retrieved_plan" and persistent_information.get('current_trip_plan'):
                         response_data_for_payload["plan_details"] = persistent_information['current_trip_plan']
-                        # Ensure the message reflects what plan_details contains (it could be the rich object)
-                        if isinstance(persistent_information['current_trip_plan'], dict):
-                            if 'base_plan' in persistent_information['current_trip_plan'] and persistent_information['current_trip_plan'].get('user_specified_stops'):
-                                final_ai_message_content = "Okay, here is the current trip plan, including the base itinerary and your specified stops."
-                            elif 'base_plan' in persistent_information['current_trip_plan']:
-                                final_ai_message_content = "Okay, here is the current base trip plan we discussed."
-                            else: # Should be the rich plan structure
-                                final_ai_message_content = "Okay, here is the stored travel plan information."
-                        # Update the message in the payload if it was changed
-                        response_data_for_payload["message"] = final_ai_message_content
+                        # The final_ai_message_content from LLM is already the guiding message for retrieval.
                     elif final_tool_name_from_turn == "retrieved_generic_info":
                         response_data_for_payload["stored_information"] = persistent_information
-                    # If retrieved_nothing or retrieved_no_available_flights, add no extra data.
-                elif current_turn_graph_intent == "clarification_request": # Check if clarification was generated
-                     determined_intent = "clarification_request"
-                     # (Clarification node handles message, no extra data needed here)
-                elif current_turn_graph_intent: # Fallback to intent router output
+                # Check if final_graph_message_obj is an AIMessage before accessing tool_calls
+                elif isinstance(final_graph_message_obj, AIMessage) and \
+                     hasattr(final_graph_message_obj, 'tool_calls') and \
+                     final_graph_message_obj.tool_calls and \
+                     any(tc.get('name') == self.request_clarification_tool.name for tc in final_graph_message_obj.tool_calls):
+                    determined_intent = "clarification_request"
+                elif current_turn_graph_intent: 
                      determined_intent = current_turn_graph_intent
-                # Default determined_intent remains general_qa_agent if none of the above match
+                # Default determined_intent remains general_qa_agent if none of the above match, and message is already set.
 
             # --- 2. Conditionally add data for specific intents (if not added above) --- #
-            # Example: If flight_agent intent, maybe add available flights from persistent state
-            # if determined_intent == "flight_agent" and not response_data_for_payload.get("flights") and persistent_information.get('available_flights'):
-            #     response_data_for_payload["flights"] = persistent_information['available_flights']
+            # This section might be less necessary now as data is added more directly with message handling.
 
             # Final payload structure
             response_payload = {
