@@ -322,6 +322,21 @@ def optimize_distance_tour(travel_duration_str, user_specified_stops_for_modific
     if travel_duration_days is None or travel_duration_days <= 0:
         return {"plan": None, "message": "Invalid travel duration provided."}
 
+    # --- Caching for find_or_create_place_details ---
+    place_details_cache = {}
+
+    def get_cached_place_details(spec, must_visit_list, restaurant_list):
+        cache_key = spec['name'].lower() # Assuming name is the primary identifier for caching
+        if cache_key in place_details_cache:
+            # print(f"DEBUG: Cache hit for {cache_key}")
+            return place_details_cache[cache_key]
+        
+        # print(f"DEBUG: Cache miss for {cache_key}, calling find_or_create_place_details")
+        details = find_or_create_place_details(spec, must_visit_list, restaurant_list)
+        place_details_cache[cache_key] = details
+        return details
+    # --- End Caching ---
+
     # --- 1. Load Data & Hotel Setup ---
     location_hotel_list = get_location_hotel()
     if not location_hotel_list:
@@ -360,23 +375,15 @@ def optimize_distance_tour(travel_duration_str, user_specified_stops_for_modific
     # Before building the plan, validate all user_specified_stops
     if user_specified_stops_for_modification:
         for stop_item_spec_idx, stop_item_spec in enumerate(user_specified_stops_for_modification):
-            # Ensure stop_item_spec is a dictionary before accessing keys
             if not isinstance(stop_item_spec, dict):
                 print(f"Warning: Invalid stop specification at index {stop_item_spec_idx}: {stop_item_spec}. Skipping.")
-                # Potentially return an error here if strict validation is needed for all inputs
-                # For now, we'll let find_or_create_place_details handle it, but it might be too late
-                # for the error message structure if it's not a dict for 'name', 'day', 'time_of_day'.
-                # It's better to validate the structure here first if possible.
-                # Assuming stop_item_spec IS a dict due to Pydantic model in tools.py
+                continue
                 if not all(k in stop_item_spec for k in ['name', 'day', 'time_of_day']):
                      print(f"Warning: Invalid stop specification (missing keys) at index {stop_item_spec_idx}: {stop_item_spec}. Skipping this stop for validation.")
-                     # This stop won't be processed further for pre-validation.
-                     # It will be handled during the planning loop, but an error there won't use the new return structure.
-                     # For now, let find_or_create_place_details catch individual errors later.
-                     # The goal is to pre-validate *all* for the early exit message.
-                     continue # Skip this malformed spec for pre-validation loop
+                     continue
 
-            place_detail_for_validation = find_or_create_place_details(stop_item_spec, must_visit_places, restaurants)
+            # Use the caching wrapper for validation
+            place_detail_for_validation = get_cached_place_details(stop_item_spec, must_visit_places, restaurants)
             if isinstance(place_detail_for_validation, dict) and place_detail_for_validation.get("error") == "not_in_da_nang":
                 problematic_stop_name = place_detail_for_validation.get("name", "Unknown place")
                 error_message = f"The specified stop '{problematic_stop_name}' is not located in Da Nang or could not be verified."
@@ -447,15 +454,10 @@ def optimize_distance_tour(travel_duration_str, user_specified_stops_for_modific
                 print(f"DEBUG: Day {current_day_number} {time_slot_capitalized} - Applying MODIFICATION.")
                 user_modification_stop_specs = modification_stops_map[current_slot_key]
                 for stop_spec_dict in user_modification_stop_specs:
-                    # Re-call find_or_create_place_details. It should be fast if already checked.
-                    # Or, we could store the validated details from the pre-check loop.
-                    # For simplicity now, recall it. Validation error should have been caught above.
-                    place_detail = find_or_create_place_details(stop_spec_dict, must_visit_places, restaurants)
+                    # Use the caching wrapper when processing modifications
+                    place_detail = get_cached_place_details(stop_spec_dict, must_visit_places, restaurants)
                     
-                    # Check if find_or_create_place_details returned an error (should have been caught in pre-validation)
                     if isinstance(place_detail, dict) and place_detail.get("error"):
-                        # This case should ideally not be reached if pre-validation works.
-                        # But as a safeguard:
                         problem_name = place_detail.get('name', 'Unknown problem place')
                         error_msg_runtime = f"Error processing stop '{problem_name}' for Day {current_day_number}, {time_slot_capitalized}: Not in Da Nang or invalid."
                         print(f"RUNTIME ERROR: {error_msg_runtime}")
@@ -478,31 +480,36 @@ def optimize_distance_tour(travel_duration_str, user_specified_stops_for_modific
                     if prev_slot_name_found and prev_day_plan_data['planned_stops'].get(prev_slot_name_found):
                         preserved_place_names = prev_day_plan_data['planned_stops'][prev_slot_name_found]
                         print(f"DEBUG: Day {current_day_number} {time_slot_capitalized} - Preserving from PREVIOUS: {preserved_place_names}")
+
+                        # --- Optimization: Create a map of previous route details for faster lookup ---
+                        previous_route_details_map = {}
+                        if prev_day_plan_data.get('route'):
+                            for r_stop in prev_day_plan_data['route']:
+                                # Key by (name_lower, time_slot_lower) for uniqueness within a day's route for a specific slot context
+                                # Note: This assumes a place name is unique for a given time_slot in the previous route.
+                                # If a place could appear multiple times in the same slot in the route (unlikely), this takes the last one.
+                                if r_stop.get('name') and r_stop.get('time_slot'): # Ensure keys exist
+                                    map_key = (r_stop['name'].lower(), r_stop['time_slot'].lower())
+                                    previous_route_details_map[map_key] = r_stop
+                        # --- End Optimization ---
+
                         for place_name in preserved_place_names:
                             if place_name.lower() not in selected_places_ever: 
                                 mock_stop_spec = {'name': place_name, 'day': current_day_number, 'time_of_day': time_slot_lower}
-                                if prev_day_plan_data.get('route'):
-                                    for r_stop in prev_day_plan_data['route']:
-                                        if r_stop.get('name', '').lower() == place_name.lower() and r_stop.get('time_slot', '').lower() == time_slot_lower:
-                                            if isinstance(r_stop.get('coords'), list) and len(r_stop['coords']) == 2:
-                                                mock_stop_spec['location'] = tuple(r_stop['coords'])
-                                            # Carry over original description and type if available
-                                            if r_stop.get('description'):
-                                                mock_stop_spec['original_description'] = r_stop['description']
-                                            if r_stop.get('type'):
-                                                mock_stop_spec['original_type'] = r_stop['type']
-                                            # Try to get original priority from the must_visit_places if it was one
-                                            # This is a bit more complex as previous_base_plan_data doesn't store original priority directly in route
-                                            # For now, preserved stops will get default priority in find_or_create_place_details if not custom
-                                            break
                                 
-                                # If location still not found in mock_stop_spec after checking route, 
-                                # it means the place was in planned_stops but not detailed in route (should not happen with current logic)
-                                # or it was a custom stop from a *previous* modification that didn't have coords then.
-                                # find_or_create_place_details will attempt to geocode it again if needed.
-
-                                place_detail = find_or_create_place_details(mock_stop_spec, must_visit_places, restaurants)
-                                # Safeguard for preserved stops that might become invalid if data sources change
+                                # --- Use the optimized map lookup ---
+                                prev_route_stop_details = previous_route_details_map.get((place_name.lower(), time_slot_lower))
+                                if prev_route_stop_details:
+                                    if isinstance(prev_route_stop_details.get('coords'), list) and len(prev_route_stop_details['coords']) == 2:
+                                        mock_stop_spec['location'] = tuple(prev_route_stop_details['coords'])
+                                    if prev_route_stop_details.get('description'):
+                                        mock_stop_spec['original_description'] = prev_route_stop_details['description']
+                                    if prev_route_stop_details.get('type'):
+                                        mock_stop_spec['original_type'] = prev_route_stop_details['type']
+                                # --- End Use Optimized Map ---
+                                
+                                # Use the caching wrapper
+                                place_detail = get_cached_place_details(mock_stop_spec, must_visit_places, restaurants)
                                 if isinstance(place_detail, dict) and place_detail.get("error"):
                                     problem_name = place_detail.get('name', 'Unknown problem place')
                                     print(f"Warning: Preserved stop '{problem_name}' from previous plan is now considered invalid. Skipping.")

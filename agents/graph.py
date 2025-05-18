@@ -472,26 +472,24 @@ Respond only with 'plan_agent', 'flight_agent', 'information_agent', 'retrieve_i
         # An interaction starts with a HumanMessage and includes all subsequent AI/Tool messages
         # until the next HumanMessage or the start of the history.
         
-        # max_human_interactions = 5
-        # human_interaction_counter = 0
-        # history_slice = [] # This will store the selected part of current_messages in correct order
+        max_human_interactions = 5
+        human_interaction_counter = 0
+        history_slice = [] # This will store the selected part of current_messages in correct order
 
-        # # Iterate through current_messages in reverse to find the latest interactions
-        # for message in reversed(current_messages):
-        #     # Skip any SystemMessage found in the history, as we are prepending system_message_to_use.
-        #     if isinstance(message, SystemMessage):
-        #         continue 
+        # Iterate through current_messages in reverse to find the latest interactions
+        for message in reversed(current_messages):
+            # Skip any SystemMessage found in the history, as we are prepending system_message_to_use.
+            if isinstance(message, SystemMessage):
+                continue 
             
-        #     history_slice.insert(0, message) # Add to the beginning to maintain chronological order
+            history_slice.insert(0, message) # Add to the beginning to maintain chronological order
             
-        #     if isinstance(message, HumanMessage):
-        #         human_interaction_counter += 1
-        #         if human_interaction_counter >= max_human_interactions:
-        #             break # Stop once we have enough interactions
+            if isinstance(message, HumanMessage):
+                human_interaction_counter += 1
+                if human_interaction_counter >= max_human_interactions:
+                    break # Stop once we have enough interactions
         
-        # message_to_send_to_model = [system_message_to_use] + history_slice
-
-        message_to_send_to_model = current_messages
+        message_to_send_to_model = [system_message_to_use] + history_slice
 
         print("Messages being sent to LLM:")
         for msg_idx, msg in enumerate(message_to_send_to_model):
