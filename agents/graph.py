@@ -169,8 +169,8 @@ class Agent:
         for message in reversed(current_messages):
             if isinstance(message, SystemMessage): # Skip any existing system messages in history
                 continue
-            if isinstance(message, ToolMessage): # Skip ToolMessages entirely for direct LLM calls
-                continue
+            # if isinstance(message, ToolMessage): # Skip ToolMessages entirely for direct LLM calls
+            #     continue
 
             history_slice.insert(0, message) # Add to the beginning to maintain order
 
@@ -180,13 +180,13 @@ class Agent:
                     break
       
         #  at least add the last human message if available, or a default one.
-        if not any(isinstance(msg, (HumanMessage, AIMessage)) for msg in history_slice):
-            last_human_message_content = "Hello." # Default content
-            for msg in reversed(current_messages): # Find the actual last human message
-                if isinstance(msg, HumanMessage):
-                    last_human_message_content = msg.content
-                    break
-            history_slice = [HumanMessage(content=last_human_message_content)]
+        # if not any(isinstance(msg, (HumanMessage, AIMessage)) for msg in history_slice):
+        #     last_human_message_content = "Hello." # Default content
+        #     for msg in reversed(current_messages): # Find the actual last human message
+        #         if isinstance(msg, HumanMessage):
+        #             last_human_message_content = msg.content
+        #             break
+        #     history_slice = [HumanMessage(content=last_human_message_content)]
 
 
         return [system_message_to_use] + history_slice

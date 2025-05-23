@@ -714,21 +714,47 @@ class TripadvisorFullCrawler:
                 # Initialize driver FOR URL Collection Phase
                 if not self._initialize_driver():
                     logging.critical("Failed to initialize driver for URL Collection Phase. Aborting crawl.")
-
-                collected_urls = self.crawl_hotel_urls() # This manages its own driver session
+                    # Ensure collected_urls remains empty or is handled if driver init fails
+                    collected_urls = [] # Ensure it's an empty list
+                else:
+                    collected_urls = self.crawl_hotel_urls() # This manages its own driver session
+                
                 logging.info("--- Finished Phase 1: URL Collection ---")
 
-                # Save collected URLs if successful
                 if collected_urls:
                     self._save_url_list(collected_urls)
                     hotel_urls_to_process = collected_urls # Use collected URLs for Phase 2
                 else:
-                    logging.warning("URL Collection phase ran but did not return any URLs.")
+                    logging.warning("URL Collection phase ran but did not return any URLs or failed to initialize driver.")
+                    hotel_urls_to_process = [] # Ensure it's empty
             
-            elif self.extract_details: # If only extracting details, load URLs
-                 logging.info("--- Skipping Phase 1: URL Collection (Disabled) ---")
-                 return # Exit if both phases are disabled
-
+            else: # self.collect_urls is False
+                logging.info("--- Skipping Phase 1: URL Collection (Disabled) ---")
+                if self.extract_details: # If we are not collecting, but ARE extracting details...
+                    logging.info(f"Attempting to load URLs from {self.url_output_file} for detail extraction.")
+                    if os.path.exists(self.url_output_file) and os.path.getsize(self.url_output_file) > 0:
+                        try:
+                            with open(self.url_output_file, 'r', encoding='utf-8') as f:
+                                loaded_urls = json.load(f)
+                            if isinstance(loaded_urls, list):
+                                hotel_urls_to_process = loaded_urls
+                                logging.info(f"Successfully loaded {len(hotel_urls_to_process)} URLs from {self.url_output_file}.")
+                            else:
+                                logging.warning(f"Content in {self.url_output_file} is not a valid list. No URLs loaded for processing.")
+                                hotel_urls_to_process = [] 
+                        except json.JSONDecodeError:
+                            logging.error(f"Error decoding JSON from {self.url_output_file}. No URLs loaded for processing.")
+                            hotel_urls_to_process = []
+                        except IOError as e:
+                            logging.error(f"IOError reading {self.url_output_file}: {e}. No URLs loaded for processing.")
+                            hotel_urls_to_process = []
+                    else:
+                        if not os.path.exists(self.url_output_file):
+                            logging.warning(f"URL file {self.url_output_file} not found. No URLs to load for processing.")
+                        else: # File exists but is empty
+                            logging.warning(f"URL file {self.url_output_file} is empty. No URLs to load for processing.")
+                        hotel_urls_to_process = []
+            
             # --- Phase 2: Extract Details (Conditional) ---
             if self.extract_details:
                 if not hotel_urls_to_process:
@@ -896,8 +922,8 @@ if __name__ == "__main__":
     URL_LIST_OUTPUT_FILE = "scrapper/data/tripadvisor_da_nang_collected_urls.json" # File for collected URLs
 
     # --- Control Flags --- # 
-    RUN_URL_COLLECTION = True  # Set to False to skip URL collection and use existing URL file
-    RUN_DETAIL_EXTRACTION = False # Set to False to skip detail extraction
+    RUN_URL_COLLECTION = False  # Set to False to skip URL collection and use existing URL file
+    RUN_DETAIL_EXTRACTION = True # Set to False to skip detail extraction
     # --------------------- #
 
     logging.info(f"--- Initializing TripAdvisor Full Crawler ---")

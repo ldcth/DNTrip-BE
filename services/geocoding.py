@@ -33,14 +33,11 @@ if __name__ == "__main__":
         print("Error: GOOGLEMAPS_API_KEY environment variable is not set.")
         print("Please set it before running the script (e.g., in a .env file).")
     else:
-        file_path = "../scrapper/data/must.json" # Adjusted path relative to services/geocoding.py
+        file_name = "tripadvisor_da_nang_final_details.json"
         try:
-            # Construct the absolute path to must.json
-            # Assuming services/geocoding.py is in DNTrip-BE/services/
-            # and must.json is in DNTrip-BE/scrapper/data/
             current_script_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(current_script_dir) # This should be DNTrip-BE
-            json_file_path = os.path.join(project_root, "scrapper", "data", "must.json")
+            project_root = os.path.dirname(current_script_dir) 
+            json_file_path = os.path.join(project_root, "scrapper", "data", file_name)
 
             with open(json_file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)

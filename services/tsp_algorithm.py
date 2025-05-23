@@ -5,11 +5,15 @@ import random
 import math # Import math for Haversine
 from services.get_coords import get_place_coords_if_in_da_nang # Added Import
 
+HOTEL_DATA_FILE = "scrapper/data/tripadvisor_da_nang_final_details.json"
+RESTAURANT_DATA_FILE = "scrapper/data/restaurants.json"
+MUST_VISIT_DATA_FILE = "scrapper/data/must.json"
+
 # --- Helper functions to load data ---
 def get_location_hotel():
     """Reads hotel data, selects one randomly, and returns its info."""
     try:
-        with open("scrapper/data/hotels.json", "r", encoding='utf-8') as f:
+        with open(HOTEL_DATA_FILE, "r", encoding='utf-8') as f:
             hotels = json.load(f)
         if not hotels:
             return []
@@ -36,7 +40,7 @@ def get_location_hotel():
 def get_restaurants():
     """Reads restaurant data and returns info for all."""
     try:
-        with open("scrapper/data/restaurants.json", "r", encoding='utf-8') as f:
+        with open(RESTAURANT_DATA_FILE, "r", encoding='utf-8') as f:
             restaurants_data = json.load(f)
         restaurants_list = []
         for r in restaurants_data:
@@ -68,7 +72,7 @@ def get_restaurants():
 def get_must_visit_places():
     """Reads must-visit places data and returns info for all."""
     try:
-        with open("scrapper/data/must.json", "r", encoding='utf-8') as f:
+        with open(MUST_VISIT_DATA_FILE, "r", encoding='utf-8') as f:
             places_data = json.load(f)
         places_list = []
         for p in places_data:
@@ -389,7 +393,7 @@ def optimize_distance_tour(travel_duration_str, user_specified_stops_for_modific
                 error_message = f"The specified stop '{problematic_stop_name}' is not located in Da Nang or could not be verified."
                 if previous_base_plan_data: # Modify mode
                     print(f"Validation failed (modify mode): {error_message}")
-                    return {"plan": previous_base_plan_data, "message": f"Cannot modify plan. I tried to modify your plan, but unfortunately, {error_message}"}
+                    return {"plan": previous_base_plan_data, "message": f"Cannot modify plan. I tried to alter your plan, but unfortunately, {error_message}"}
                 else: # Create mode
                     print(f"Validation failed (create mode): {error_message}")
                     return {"plan": None, "message": f"Cannot create plan. I tried to create your plan, but unfortunately, {error_message}"}    
