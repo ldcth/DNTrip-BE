@@ -20,6 +20,11 @@ from .prompts import (
     RELEVANCE_CHECK_PROMPT,
     INTENT_ROUTER_PROMPT,
     NATURAL_CLARIFICATION_PROMPT,
+    DIRECT_ANSWER_SYSTEM_PROMPT,
+    PLAN_AGENT_SYSTEM_PROMPT,
+    FLIGHT_AGENT_SYSTEM_PROMPT,
+    INFORMATION_AGENT_SYSTEM_PROMPT,
+    GENERAL_QA_SYSTEM_PROMPT,
 )
 from .agent_helpers import get_natural_clarification_question, prepare_response_payload
 
@@ -43,9 +48,8 @@ def _dummy_request_clarification_func(missing_parameter_name: str, original_tool
 
 class Agent:
     def __init__(self):
-        self.system = SYSTEM_PROMPT
         self.llm = ChatOpenAI(
-                model="gpt-4o-mini",
+                model=os.getenv("MODEL_VERSION"),
                 temperature=0,
                 api_key=os.getenv("OPENAI_API_KEY")
             )
@@ -71,7 +75,7 @@ class Agent:
         ])
 
         self.router_llm = ChatOpenAI(
-                model="gpt-4o-mini",
+                model=os.getenv("MODEL_VERSION"),
                 temperature=0,
                 api_key=os.getenv("OPENAI_API_KEY")
             )
@@ -155,6 +159,30 @@ class Agent:
         self.tools = {t.name: t for t in [self.tavily_search, self.planner_tool, self.flight_tool, self.select_flight_tool]}
         self.tools[self.request_clarification_tool.name] = None
 
+    def _get_system_prompt_for_intent(self, intent: str) -> str:
+        """Get the appropriate system prompt based on the current intent."""
+        prompt_mapping = {
+            "plan_agent": PLAN_AGENT_SYSTEM_PROMPT,
+            "flight_agent": FLIGHT_AGENT_SYSTEM_PROMPT,
+            "information_agent": INFORMATION_AGENT_SYSTEM_PROMPT,
+            "general_qa_agent": GENERAL_QA_SYSTEM_PROMPT,
+        }
+        return prompt_mapping.get(intent, SYSTEM_PROMPT)  # Default to original prompt if intent not found
+
+    def _get_tools_for_intent(self, intent: str) -> list:
+        """Get the appropriate tools based on the current intent."""
+        if intent == "plan_agent":
+            return [self.planner_tool, self.request_clarification_tool]
+        elif intent == "flight_agent":
+            return [self.flight_tool, self.select_flight_tool, self.request_clarification_tool]
+        elif intent == "information_agent":
+            return [self.tavily_search, self.request_clarification_tool]
+        elif intent == "general_qa_agent":
+            return [self.request_clarification_tool]  # Minimal tools for general QA
+        else:
+            # Default: all tools available
+            return [self.tavily_search, self.planner_tool, self.flight_tool, self.select_flight_tool, self.request_clarification_tool]
+
     def _prepare_messages_for_llm(self, current_messages: list[AnyMessage], system_prompt: str, max_human_interactions: int = 5) -> list[AnyMessage]:
         """
         Prepares a list of messages for the LLM by selecting a recent history slice
@@ -227,15 +255,16 @@ class Agent:
     def direct_llm_answer(self, state: AgentState):
         messages_from_state = state['messages']
         
-        # Use the new helper function to prepare messages
+        # Use the specific prompt for direct answers (persona, history, simple questions)
         final_messages_for_llm = self._prepare_messages_for_llm(
             current_messages=messages_from_state,
-            system_prompt=self.system,
-            max_human_interactions=5 # Or a different value if desired for direct answers
+            system_prompt=DIRECT_ANSWER_SYSTEM_PROMPT,
+            max_human_interactions=5
         )
         
-        # print(f"DEBUG: Messages being sent to self.model.invoke in direct_llm_answer: {final_messages_for_llm}")
-        response_message = self.model.invoke(final_messages_for_llm)
+        # Use LLM without tools for direct answers
+        # print(f"DEBUG: Messages being sent to self.llm.invoke in direct_llm_answer: {final_messages_for_llm}")
+        response_message = self.llm.invoke(final_messages_for_llm)
         return {'messages': [response_message]}
 
     def check_relevance(self, state: AgentState):
@@ -374,11 +403,20 @@ class Agent:
     def call_llm_with_tools(self, state: AgentState):
         print("--- Calling LLM with Tools ---")
         current_messages = state['messages']
+        
+        # Get the intent from state and select appropriate system prompt and tools
+        intent = state.get("intent", "general_qa_agent")
+        system_prompt = self._get_system_prompt_for_intent(intent)
+        intent_tools = self._get_tools_for_intent(intent)
+        print(f"Using system prompt for intent: {intent} with {len(intent_tools)} tools")
 
-        # Use the new helper function to prepare messages
+        # Create a temporary model with intent-specific tools
+        intent_model = self.llm.bind_tools(intent_tools)
+
+        # Use the intent-specific prompt to prepare messages
         message_to_send_to_model = self._prepare_messages_for_llm(
             current_messages=current_messages,
-            system_prompt=self.system,
+            system_prompt=system_prompt,
             max_human_interactions=5 
         )
 
@@ -399,7 +437,7 @@ class Agent:
                  print(f"    Content: {content_preview}...")
 
         print(f"Calling model with {len(message_to_send_to_model)} messages: {[m.type for m in message_to_send_to_model]}")
-        llm_response_message = self.model.invoke(message_to_send_to_model)
+        llm_response_message = intent_model.invoke(message_to_send_to_model)
         print(f"LLM response type: {llm_response_message.type}")
         if hasattr(llm_response_message, 'tool_calls') and llm_response_message.tool_calls:
              print(f"LLM requested tool calls: {llm_response_message.tool_calls}")
