@@ -81,9 +81,32 @@ CRITERIA FOR RELEVANCE (if LATEST USER QUERY meets these, respond 'continue'):
 CRITERIA FOR NON-RELEVANCE (if LATEST USER QUERY meets this, respond 'end'):
 -   Introduces a topic clearly outside Da Nang travel AND is not a direct follow-up or related to stored Da Nang travel data.
 
-Respond with ONLY ONE WORD: EITHER 'continue' OR 'end'. NO OTHER TEXT.
-Example for relevant: continue
-Example for not relevant: end
+EXAMPLES:
+
+RELEVANT QUERIES (respond 'continue'):
+- "Plan a 3-day trip to Da Nang"
+- "What's the weather like in Da Nang?"
+- "Show me flights from Hanoi to Da Nang"
+- "What attractions are in Da Nang?"
+- "Show me my current itinerary"
+- "Select the first flight"
+- "Add Marble Mountains to day 2"
+- "What were those flight options again?"
+- "Can you modify my plan?"
+- "I want to go to Ba Na Hills instead"
+
+NON-RELEVANT QUERIES (respond 'end'):
+- "What's the capital of France?"
+- "Tell me about Bangkok attractions"
+- "How do I cook pasta?"
+- "What's the weather in Tokyo?"
+- "Plan a trip to Thailand"
+- "Show me flights to Paris"
+
+## REMEMBER:
+- ONLY output: continue OR end
+- NO other words, explanations, or formatting
+- Focus primarily on the LATEST query, use context for clarification only
 """
 
 INTENT_ROUTER_PROMPT = """Given the user query (which is relevant to Da Nang travel), classify the primary intent:

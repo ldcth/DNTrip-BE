@@ -1,6 +1,7 @@
 import os
 import traceback
 from dotenv import load_dotenv
+from langsmith import traceable
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.mongodb import MongoDBSaver
 from pymongo import MongoClient
@@ -29,6 +30,11 @@ from .prompts import (
 from .agent_helpers import get_natural_clarification_question, prepare_response_payload
 
 load_dotenv()
+
+os.environ["LANGCHAIN_TRACING_V2"] = os.getenv("LANGCHAIN_TRACING_V2")
+os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGCHAIN_API_KEY")
+os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT")
+
 
 # mongodb_uri = os.getenv("MONGODB_URI")
 # if not mongodb_uri:
@@ -827,6 +833,7 @@ class Agent:
                 "information": initial_persistent_information,
                 "pending_clarification": None
             }
+            
             final_state = self.graph.invoke(initial_state_values, config=thread)
 
             final_ai_message_content = "Error: Could not determine agent's final message."
