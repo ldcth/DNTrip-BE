@@ -8,6 +8,7 @@ import time
 import json
 from collections import deque
 import re
+import os
 
 class GoogleMapsCrawler:
     def __init__(self):
@@ -22,13 +23,13 @@ class GoogleMapsCrawler:
             # "10.7754483_106.6895788"  # Ho Chi Minh
         ]
         self.keywords = [
-            # "restaurant", 
-            # "coffee", 
-            "mall", 
-            # "hospital", 
-            # "school"
-            # "hotel"
-        ]
+    'tourist_attraction', 'restaurant', 'cafe', 'bar',
+    'bakery', 'supermarket',
+    'shopping_mall', 'store', 'souvenir_store', 'clothing_store', 'campground',
+    'museum', 'art_gallery',
+    'park', 'zoo', 'aquarium', 'amusement_park', 'stadium',
+    'hospital', 'pharmacy', 'atm'
+]
         self.current_keyword = ""
         self.list_location_gotten = set()
         self.list_needed_get = deque()
@@ -113,7 +114,7 @@ class GoogleMapsCrawler:
         self.driver.quit()
     
     def crawl_keyword(self):
-        all_places = set()
+        places = []
         while self.list_needed_get:
             # Navigate to Google Maps
             latitude, longitude = self.list_needed_get.popleft().split('_')
@@ -130,9 +131,8 @@ class GoogleMapsCrawler:
             # Wait for results to load
             time.sleep(3)
             
-            places = []
             scrolls = 0
-            max_scrolls = 2  # Adjust this number to crawl more results
+            max_scrolls = 4  # Adjust this number to crawl more results
             processed_elements = set()  # Track which elements we've already processed
             
             while scrolls < max_scrolls:
@@ -242,15 +242,39 @@ class GoogleMapsCrawler:
                 
                 scrolls += 1
             
-                print(f"Crawled {len(places)} {self.current_keyword} at location {latitude}, {longitude}")
+            print(f"Crawled {len(places)} {self.current_keyword} at location {latitude}, {longitude}")
 
-                # Save all results for this keyword to a single file
-                # filename = f"{self.current_keyword.replace(' ', '_')}_{latitude}_{longitude}.json"
-                filename = f"{self.current_keyword.replace(' ', '_')}.json"
-                with open("../data" + filename, 'w', encoding='utf-8') as f:
-                    json.dump(places, f, ensure_ascii=False, indent=2)
-                
-                print(f"Saved {len(places)} {self.current_keyword} places to {filename}")
+        # Save all results for this keyword to a single file
+        filename = f"{self.current_keyword.replace(' ', '_')}.json"
+        
+        output_dir = os.path.join("scrapper", "gg")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, filename)
+        
+        # Load existing data to avoid overwriting
+        all_places_for_keyword = []
+        if os.path.exists(output_path):
+            try:
+                with open(output_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        all_places_for_keyword = data
+            except json.JSONDecodeError:
+                pass  # File is corrupt or empty, will be overwritten.
+
+        # Create a set of keys from existing places for efficient lookup
+        existing_keys = {f"{p.get('lat')}_{p.get('lon')}" for p in all_places_for_keyword}
+        
+        # Add new, unique places to the list
+        for place in places:
+            key = f"{place.get('lat')}_{place.get('lon')}"
+            if key not in existing_keys:
+                all_places_for_keyword.append(place)
+
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(all_places_for_keyword, f, ensure_ascii=False, indent=2)
+        
+        print(f"Saved {len(all_places_for_keyword)} {self.current_keyword} places to {output_path}")
 
 if __name__ == "__main__":
     crawler = GoogleMapsCrawler()

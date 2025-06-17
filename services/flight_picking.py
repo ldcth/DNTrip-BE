@@ -91,12 +91,15 @@ def _get_flights_from_json_file(origin_city: str, origin_code: str, date_iso: st
             data = json.load(f)
 
         if isinstance(data, list):
-            flights_to_show = data[:10]
+            # flights_to_show = data[:10]
+            flights_to_show = data
             # Add source identifier
             return {"source": "json", "flights": flights_to_show}
         elif isinstance(data, dict) and 'flights' in data and isinstance(data['flights'], list):
              # Add source identifier
-             return {"source": "json", "flights": data['flights'][:10]}
+            #  return {"source": "json", "flights": data['flights'][:10]}
+             return {"source": "json", "flights": data['flights']}
+
         else:
             print(f"Warning: Unexpected data structure in {filename}.")
             return {"error": "Could not process the JSON flight data file due to unexpected structure."}
@@ -151,7 +154,9 @@ def get_flight_data_from_db(origin_code: str, date_iso: str) -> dict:
             return {"message": f"No flights found in database matching origin '{origin_code}' and date '{date_iso}'."}
         else:
              # Limit to 10 flights for the final response if more were found
-             return {"source": "mongodb", "flights": flights[:10]}
+            #  return {"source": "mongodb", "flights": flights[:10]}
+             return {"source": "mongodb", "flights": flights}
+
 
     except pymongo.errors.PyMongoError as e:
         print(f"Error querying MongoDB: {e}")

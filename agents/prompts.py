@@ -58,7 +58,7 @@ INITIAL_ROUTER_PROMPT = """Classify the following user query into one of these c
 - 'content': Any other type of question, including travel planning, flight searches, general info requests, OR requests to *recall* or *repeat* information previously provided (e.g., 'show me the plan again', 'what were those flights?').
 Respond only with the category name."""
 
-RELEVANCE_CHECK_PROMPT = """Your primary task is to determine if the LATEST USER QUERY (the last message in the provided history) is relevant to Da Nang travel.
+RELEVANCE_CHECK_PROMPT = """Your only task is to reply with `continue` if the user's last message is about Da Nang travel, or `end` if it is not.
 
 You are given:
 1.  The LATEST USER QUERY (as the last message in the history).
@@ -75,6 +75,9 @@ Instructions:
 CRITERIA FOR RELEVANCE (if LATEST USER QUERY meets these, respond 'continue'):
 1.  Directly asks about travel IN or TO Da Nang (planning, flights, attractions, general info, weather).
 2.  Is a direct follow-up or clarification related to Da Nang travel from the CONVERSATION HISTORY.
+    - Example: If the assistant asks "What date are you planning to travel?", a user response like "on a date" is a relevant follow-up.
+    - Example: If the assistant asks "What city will you be departing from?", a user response like "hanoi" is a relevant follow-up.
+    - Example: If the assistant asks "How long will you be staying?", a user response like "3 days" is a relevant follow-up.
 3.  Is an action/selection related to Da Nang travel options the assistant might have presented (check HISTORY).
 4.  Asks to recall/review Da Nang travel information (check STORED INFORMATION SUMMARY and HISTORY).
 
@@ -103,10 +106,12 @@ NON-RELEVANT QUERIES (respond 'end'):
 - "Plan a trip to Thailand"
 - "Show me flights to Paris"
 
-## REMEMBER:
-- ONLY output: continue OR end
-- NO other words, explanations, or formatting
-- Focus primarily on the LATEST query, use context for clarification only
+## FINAL INSTRUCTIONS ##
+You MUST respond with ONLY ONE of the following words:
+- `continue`
+- `end`
+
+DO NOT EXPLAIN. DO NOT ADD TEXT.
 """
 
 INTENT_ROUTER_PROMPT = """Given the user query (which is relevant to Da Nang travel), classify the primary intent:

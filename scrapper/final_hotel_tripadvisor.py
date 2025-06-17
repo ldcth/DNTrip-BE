@@ -922,8 +922,8 @@ if __name__ == "__main__":
     URL_LIST_OUTPUT_FILE = "scrapper/data/tripadvisor_da_nang_collected_urls.json" # File for collected URLs
 
     # --- Control Flags --- # 
-    RUN_URL_COLLECTION = False  # Set to False to skip URL collection and use existing URL file
-    RUN_DETAIL_EXTRACTION = True # Set to False to skip detail extraction
+    RUN_URL_COLLECTION = True  # Set to False to skip URL collection and use existing URL file
+    RUN_DETAIL_EXTRACTION = False # Set to False to skip detail extraction
     # --------------------- #
 
     logging.info(f"--- Initializing TripAdvisor Full Crawler ---")
