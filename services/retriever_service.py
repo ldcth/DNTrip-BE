@@ -9,13 +9,24 @@ from sentence_transformers import SentenceTransformer
 class RetrieverService:
     def __init__(self, data_path="scrapper/data"):
         self.data_path = data_path
-        self.restaurants = self._load_data("restaurants.json")
-        self.hotels = self._load_data("tripadvisor_da_nang_final_details.json")
-        self.all_places = self.restaurants + self.hotels
         
-        # Create sets of names for efficient type checking
-        self.restaurant_names = {p.get("name") for p in self.restaurants}
-        self.hotel_names = {p.get("name") for p in self.hotels}
+        self.places = self._load_data("combined_data.json")
+        self.hotels = self._load_data("tripadvisor_da_nang_final_details.json")
+        
+        self._process_hotel_data()
+        
+        self.all_places = self.places + self.hotels
+        
+        self.place_names_by_category = {}
+        for place in self.all_places:
+            category = place.get("category", "unknown")
+            if category not in self.place_names_by_category:
+                self.place_names_by_category[category] = set()
+            self.place_names_by_category[category].add(place.get("name"))
+        
+        # For backward compatibility
+        self.restaurant_names = self.place_names_by_category.get("restaurant", set()) | self.place_names_by_category.get("cafe", set())
+        self.hotel_names = self.place_names_by_category.get("hotel", set())
         
         # Load semantic search components
         self.index = None
@@ -42,11 +53,48 @@ class RetrieverService:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 for item in data:
-                    item['source_file'] = filename # Tag with source
+                    item['source_file'] = filename  # Tag with source
                 return data
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Warning: Could not load data from {file_path}. Error: {e}")
             return []
+
+    def _process_hotel_data(self):
+        """Process hotel data to match the combined data format."""
+        for item in self.hotels:
+            if 'rating_count' in item:
+                item['list_rating'] = item['rating_count']
+                del item['rating_count']
+            
+            item['category'] = 'hotel'
+            
+            if 'lat' in item and isinstance(item['lat'], str):
+                try:
+                    item['lat'] = float(item['lat'])
+                except ValueError:
+                    item['lat'] = None
+            
+            if 'lon' in item and isinstance(item['lon'], str):
+                try:
+                    item['lon'] = float(item['lon'])
+                except ValueError:
+                    item['lon'] = None
+            
+            if 'phone' not in item:
+                item['phone'] = 'N/A'
+
+    def get_places_by_category(self, category: str = None) -> List[Dict[str, Any]]:
+        """Get places filtered by category."""
+        if category is None:
+            return self.all_places
+        
+        category = category.lower()
+        return [p for p in self.all_places if p.get("category", "").lower() == category]
+
+    @property
+    def restaurants(self):
+        """Get all restaurants and cafes from all places."""
+        return [p for p in self.all_places if p.get("category") in ["restaurant", "cafe"]]
 
     def _calculate_haversine_distance(self, lat1, lon1, lat2, lon2):
         """Calculates the distance between two points on Earth."""
@@ -87,7 +135,7 @@ class RetrieverService:
         query_embedding = np.array(query_embedding).astype('float32')
 
         # D: distances, I: indices
-        distances, indices = self.index.search(query_embedding, k * 2) # Fetch more to filter
+        distances, indices = self.index.search(query_embedding, k * 2)  # Fetch more to filter
         
         results = []
         found_names = set()
@@ -98,18 +146,21 @@ class RetrieverService:
                 full_item = next((p for p in self.all_places if p['name'] == mapped_item['name']), None)
                 
                 if full_item and full_item['name'] not in found_names:
-                    item_name = full_item.get('name')
-                    # Robust type checking
-                    is_hotel = item_name in self.hotel_names
-                    is_restaurant = item_name in self.restaurant_names
-
-                    if entity_type == "hotel" and not is_hotel:
-                        continue
-                    if (entity_type == "restaurant" or entity_type == "cafe") and not is_restaurant:
-                        continue
+                    # Filter by entity type if specified
+                    if entity_type:
+                        item_category = full_item.get('category', '').lower()
+                        entity_type_lower = entity_type.lower()
+                        
+                        # Check if the item matches the requested entity type
+                        if entity_type_lower == "hotel" and item_category != "hotel":
+                            continue
+                        elif entity_type_lower in ["restaurant", "cafe"] and item_category not in ["restaurant", "cafe"]:
+                            continue
+                        elif entity_type_lower not in ["hotel", "restaurant", "cafe"] and item_category != entity_type_lower:
+                            continue
                     
                     results.append(full_item)
-                    found_names.add(item_name)
+                    found_names.add(full_item['name'])
 
             if len(results) >= k:
                 break
@@ -134,12 +185,13 @@ class RetrieverService:
             print("--- Attempting Distance Search ---")
             ref_location = self._resolve_location_reference(location_ref)
             if ref_location and ref_location.get("lat") and ref_location.get("lon"):
-                source_data = self.all_places
-                if entity_type == "restaurant" or entity_type == "cafe":
-                    source_data = self.restaurants
-                elif entity_type == "hotel":
-                    source_data = self.hotels
+                # Get appropriate source data based on entity type
+                if entity_type and entity_type.lower() != "place":
+                    source_data = self.get_places_by_category(entity_type)
+                else:
+                    source_data = self.all_places
                 
+                # Calculate distances
                 for place in source_data:
                     place_lat = place.get("lat")
                     place_lon = place.get("lon")
@@ -150,6 +202,7 @@ class RetrieverService:
                         )
                         place["distance_km"] = round(distance, 2)
                 
+                # Filter and sort by distance
                 source_data = [p for p in source_data if "distance_km" in p]
                 source_data.sort(key=lambda x: x["distance_km"])
                 return source_data[:top_k]
@@ -161,11 +214,9 @@ class RetrieverService:
         # 2. If a location filter is provided, perform a keyword search on the address
         if location_filter:
             print("--- Performing Keyword Search on Location ---")
-            source_data = []
-            if entity_type == "restaurant" or entity_type == "cafe":
-                source_data = self.restaurants
-            elif entity_type == "hotel":
-                source_data = self.hotels
+            # Get appropriate source data based on entity type
+            if entity_type and entity_type.lower() != "place":
+                source_data = self.get_places_by_category(entity_type)
             else:
                 source_data = self.all_places
             
@@ -174,8 +225,9 @@ class RetrieverService:
                 if location_filter in place.get("address", "").lower()
             ]
             
+            # Sort by rating
             filtered_results.sort(
-                key=lambda x: float(x.get("rating", "0").replace(",", ".")),
+                key=lambda x: float(str(x.get("rating", "0")).replace(",", ".")),
                 reverse=True
             )
             return filtered_results[:top_k]

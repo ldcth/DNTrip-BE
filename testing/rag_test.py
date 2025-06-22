@@ -70,29 +70,29 @@ def main_test_and_evaluate():
             score = len(places) - i  # Create a descending score based on rank
             all_runs.append(ir_measures.ScoredDoc(q_id, place.get("name"), score))
 
-    print("\n\n--- Overall Evaluation ---")
+    # print("\n\n--- Overall Evaluation ---")
     
-    # Create the complete ground truth object
-    all_qrels = [ir_measures.Qrel(qid, doc, 1) for qid, docs in GROUND_TRUTH.items() for doc in docs]
+    # # Create the complete ground truth object
+    # all_qrels = [ir_measures.Qrel(qid, doc, 1) for qid, docs in GROUND_TRUTH.items() for doc in docs]
     
-    # Define measures
-    measures = [P@3, RR, AP, nDCG@5]
+    # # Define measures
+    # measures = [P@3, RR, AP, nDCG@5]
     
-    # Use iter_calc to get per-query results in one go
-    results_iterator = ir_measures.iter_calc(measures, all_qrels, all_runs)
+    # # Use iter_calc to get per-query results in one go
+    # results_iterator = ir_measures.iter_calc(measures, all_qrels, all_runs)
     
-    # Group results by query for clean printing
-    per_query_results = {}
-    for metric in results_iterator:
-        if metric.query_id not in per_query_results:
-            per_query_results[metric.query_id] = {}
-        per_query_results[metric.query_id][str(metric.measure)] = metric.value
+    # # Group results by query for clean printing
+    # per_query_results = {}
+    # for metric in results_iterator:
+    #     if metric.query_id not in per_query_results:
+    #         per_query_results[metric.query_id] = {}
+    #     per_query_results[metric.query_id][str(metric.measure)] = metric.value
         
-    # Print the final report
-    for q_id, scores in sorted(per_query_results.items()):
-        print(f"\n--- Statistics for Query ({q_id}): '{QUERIES[q_id]}' ---")
-        for measure_name, value in scores.items():
-            print(f"  {measure_name:<8}: {value:.4f}")
+    # # Print the final report
+    # for q_id, scores in sorted(per_query_results.items()):
+    #     print(f"\n--- Statistics for Query ({q_id}): '{QUERIES[q_id]}' ---")
+    #     for measure_name, value in scores.items():
+    #         print(f"  {measure_name:<8}: {value:.4f}")
 
 if __name__ == "__main__":
     main_test_and_evaluate() 

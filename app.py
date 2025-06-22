@@ -12,6 +12,11 @@ from database.user import Users
 from database.conversation import Conversations
 from database.content import Contents
 from datetime import timedelta
+import subprocess
+import sys
+import threading
+import schedule
+import time
 
 from flask_jwt_extended import (
     JWTManager,
@@ -34,6 +39,37 @@ CORS(app)
 llm_agent = LLMAgent()
 
 travel_planner_instance = Agent()
+
+scheduler_running = False
+
+def run_flight_scraper():
+    """Run the flight scraper script"""
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(current_dir, 'scrapper', 'flight_kayak_final.py')
+        subprocess.run([sys.executable, script_path], cwd=current_dir)
+        print(f"✅ Flight scraper completed at {time.strftime('%H:%M:%S')}")
+    except Exception as e:
+        print(f"❌ Error running flight scraper: {str(e)}")
+
+def setup_scheduler():
+    """Set up daily midnight scheduler"""
+    global scheduler_running
+    if not scheduler_running:
+        schedule.every().day.at("00:40").do(run_flight_scraper)
+        scheduler_running = True
+        threading.Thread(target=lambda: [schedule.run_pending() or time.sleep(60) for _ in iter(int, 1)], daemon=True).start()
+        print("✅ Flight scraper scheduled for daily midnight runs")
+
+@app.route('/api/cron/run-now', methods=['POST'])
+def run_now():
+    """Manually trigger flight scraper"""
+    try:
+        threading.Thread(target=run_flight_scraper, daemon=True).start()
+        return jsonify({"message": "Flight scraper started", "status": "success"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "error"}), 500
+
 
 @app.route("/")
 def index():
@@ -227,5 +263,6 @@ def get_conversation_content(id):
 
 # --- Main execution block ---
 if __name__ == "__main__":
-    # Standard Flask run
+    print("🚀 Starting Flask application...")
+    # setup_scheduler()
     app.run(debug=True, port=3001, host="0.0.0.0")

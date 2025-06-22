@@ -1,0 +1,546 @@
+[
+  {
+    "type": "category_filtering",
+    "queries": {
+      "cat_q1": "show me all restaurants",
+      "cat_q2": "find hotels in da nang",
+      "cat_q3": "list all cafes",
+      "cat_q4": "show supermarkets",
+      "cat_q5": "find bars and pubs",
+      "cat_q6": "museums in the area",
+      "cat_q7": "art galleries",
+      "cat_q8": "show me bakeries",
+      "cat_q9": "find camping grounds",
+      "cat_q10": "tourist attractions"
+    },
+    "ground_truth": {
+      "cat_q1": [
+        "Riverside Terrace Restaurant",
+        "Nhà hàng Nhà Gỗ Việt Đà Nẵng",
+        "Nhà hàng Bếp Việt",
+        "Nhà hàng Làn Gió",
+        "Papa Steak",
+        "Ăn Thôi - Michelin Bib Gourmand Awarded Vietnamese Restaurant / 안토이",
+        "Bếp Lụa restaurant 베트남 식당",
+        "Restaurant PHỞ HOUSE",
+        "Huong Restaurant",
+        "Đặc Sản Dê Núi Ninh Bình Tại Đà Nẵng-Nhà hàng Hoa Lư (Hoa Lu restaurant)"
+      ],
+      "cat_q2": [
+        "Satya Da Nang Hotel",
+        "Muong Thanh Luxury Da Nang Hotel",
+        "Da Nang Mikazuki Japanese Resort & Spa",
+        "DLG Hotel Danang",
+        "Danang Marriott Resort & Spa",
+        "Intercontinental Danang Sun Peninsula Resort, an IHG hotel",
+        "Sel de Mer Hotel & Suites",
+        "Muong Thanh Grand Da Nang Hotel",
+        "Melia Danang Beach Resort",
+        "Grand Sunrise Boutique Hotel"
+      ],
+      "cat_q3": [
+        "KIM Cafe & Office",
+        "Cafe Cosy - Cà phê & trà",
+        "Cafe Góc Phố",
+        "Simple Garden Cafe",
+        "NAM house Cafe",
+        "Đốm Café",
+        "Gé Cafe",
+        "Đồng Nâu Cafe",
+        "Ý Là Cafe Signature",
+        "Cà Phê Muối Huế 3 - N Salt Cafe Trần Phú"
+      ],
+      "cat_q4": [
+        "Lotte Mart Đà Nẵng",
+        "GO! Đà Nẵng",
+        "JOLY MART Yên Bái",
+        "Co.opmart Đà Nẵng",
+        "MM Mega Market Đà Nẵng",
+        "GUGO Mart",
+        "Siêu thị Danavi Mart",
+        "Farm And Mart",
+        "WinMart+",
+        "Full Market 24/7"
+      ],
+      "cat_q5": [
+        "Karaoke Royal club",
+        "Karaoke Vip Đà Nẵng Queen Palace",
+        "EMBER - THE BALCONY BAR",
+        "Bamboo 2 Bar Danang",
+        "CHEERS PUB & DINING",
+        "Sky Pub",
+        "Lounge Beach bar & Restaurant",
+        "Scallywags Bar and Grill",
+        "Chevy sports bar and Bistro",
+        "The Trip 66"
+      ],
+      "cat_q6": [
+        "Bảo tàng Đà Nẵng",
+        "Bảo tàng Hồ Chí Minh",
+        "Bảo tàng Điêu khắc Chăm Đà Nẵng",
+        "Non Nuoc Stone Carving Memory Museum Da Nang City",
+        "PNT International Airport",
+        "Lua Silk Cultural Museum",
+        "Nhà Trưng bày Hoàng Sa",
+        "Samdi",
+        "Khu Căn cứ Cách mạng K20",
+        "DNTN TÂN TÂN"
+      ],
+      "cat_q7": [
+        "Bảo tàng Mỹ thuật Đà Nẵng",
+        "Savoring Coffee & Art Gallery",
+        "Bảo tàng 3D Art In Paradise",
+        "Brocanvas - Tranh Canvas Treo Tường Đà Nẵng",
+        "Danang Art Class | Art Supplies | Daily Art Workshop | 미술관",
+        "ART GALLERY-Xưởng tranh sơn dầu Đà Nẵng",
+        "MF - Gallery & Studio",
+        "TRANH SƠN DẦU ĐÀ NẴNG - THANHBUI GALLERY",
+        "Bảo tàng Đồng Đình",
+        "Artta Studio"
+      ],
+      "cat_q8": [
+        "Hoa Mai Bakery",
+        "ABC Bakery Go Gelato Đà Nẵng",
+        "BonPas Bakery & Cafe",
+        "Đồng Tiến Bakery",
+        "La Dulce Bakery & Coffee",
+        "Bakery Paris Levain Monarchy",
+        "Ba Anh Bakery",
+        "Noen Bakery & Fruit 38 Mỹ An 23",
+        "Devis bakery",
+        "RB's bakery & coffee"
+      ],
+      "cat_q9": [
+        "Thế Vinh homestay",
+        "VỌC Glamping",
+        "Gò Dậy Glamping",
+        "Paka",
+        "Bãi Cháy",
+        "Bãi Kè Cạn",
+        "Cá Chuồn Space",
+        "Hoa Cau Vườn Trầu farm",
+        "Đà Nẵng Camp - Cho thuê đồ cắm trại",
+        "Facago house"
+      ],
+      "cat_q10": [
+        "Di tích Thành Điện Hải",
+        "Công viên APEC",
+        "Đà Nẵng Downtown",
+        "Công viên Nguyễn Văn Trỗi",
+        "Han River Bridge Viewpoint",
+        "Para Tours",
+        "Cầu Trần Thị Lý",
+        "Đà Nẵng Food Tour",
+        "Công Ty TNHH Lữ Hành Fly Dream ( Dù lượn Đà Nẵng )",
+        "Love Pier"
+      ]
+    }
+  },
+  {
+    "type": "semantic_search",
+    "queries": {
+      "sem_q1": "romantic dinner restaurant with river view",
+      "sem_q2": "luxury beachfront hotel with spa facilities",
+      "sem_q3": "cozy coffee shop for working",
+      "sem_q4": "fresh seafood restaurant near beach",
+      "sem_q5": "budget friendly hotel downtown",
+      "sem_q6": "rooftop bar with city view",
+      "sem_q7": "traditional vietnamese cuisine",
+      "sem_q8": "family friendly resort with pool",
+      "sem_q9": "trendy cafe with good wifi",
+      "sem_q10": "fine dining michelin restaurant"
+    },
+    "ground_truth": {
+      "sem_q1": [
+        "Riverside Terrace Restaurant",
+        "The View - Yacht Restaurant Da Nang",
+        "Nhà hàng Làn Gió",
+        "@Limoncello Danang",
+        "Esco Beach Bar Lounge & Restaurant",
+        "Lounge Beach bar & Restaurant",
+        "Nhà hàng LoCo",
+        "Vấn Cocktail Bar",
+        "Cheers Restaurant",
+        "Anchor Restaurant & Beer (Bistro & Boutique)"
+      ],
+      "sem_q2": [
+        "Intercontinental Danang Sun Peninsula Resort, an IHG hotel",
+        "Danang Marriott Resort & Spa",
+        "Melia Danang Beach Resort",
+        "Da Nang Mikazuki Japanese Resort & Spa",
+        "DLG Hotel Danang",
+        "Sandy Beach Non Nuoc Resort",
+        "Muong Thanh Luxury Da Nang Hotel",
+        "Altara Suites",
+        "Yarra Ocean Suites Danang",
+        "The Blossom Resort Island - All Inclusive"
+      ],
+      "sem_q3": [
+        "The Joy Cafe",
+        "Good Coffee",
+        "Trình cà phê",
+        "Reply 1988 Cafe",
+        "KIM Cafe & Office",
+        "Ý Là Cafe Signature",
+        "Simple Garden Cafe",
+        "Ơi Cafe",
+        "NAM house Cafe",
+        "Đốm Café"
+      ],
+      "sem_q4": [
+        "Esco Beach Bar Lounge & Restaurant",
+        "Lounge Beach bar & Restaurant",
+        "The View - Yacht Restaurant Da Nang",
+        "Riverside Terrace Restaurant",
+        "Papa Steak",
+        "Ăn Thôi - Michelin Bib Gourmand Awarded Vietnamese Restaurant / 안토이",
+        "TOM82 DANANG Restaurant - 다낭 똠팔이",
+        "Quán Huế Ngon - 다낭최고의 로컬 BBQ 레스토랑- Best local food in Da Nang",
+        "Nhà Hàng Đồ Ăn Thái - Thai Market Restaurant - Trần Quốc Toản",
+        "Bếp Lụa restaurant 베트남 식당"
+      ],
+      "sem_q5": [
+        "Grand Sunrise Boutique Hotel",
+        "Satya Da Nang Hotel",
+        "Muong Thanh Grand Da Nang Hotel",
+        "Fivitel Boutique Da Nang",
+        "Avatar Hotel Da Nang",
+        "Mường Thanh Luxury Sông Hàn Hotel",
+        "Sandy Beach Non Nuoc Resort",
+        "Vanda Hotel",
+        "Brown Bean Hotel",
+        "AIRPORT Homestay"
+      ],
+      "sem_q6": [
+        "Vấn Cocktail Bar",
+        "Kết High cocktail bar - 켓 바 2",
+        "The Hangover Bar",
+        "Sky Pub",
+        "EMBER - THE BALCONY BAR",
+        "Navy Lounge",
+        "Horizon Bar",
+        "CHEERS PUB & DINING",
+        "Bamboo 2 Bar Danang",
+        "Beer Hub - Nhà Hàng Bia Tươi Đức"
+      ],
+      "sem_q7": [
+        "Ăn Thôi - Michelin Bib Gourmand Awarded Vietnamese Restaurant / 안토이",
+        "Bếp Lụa restaurant 베트남 식당",
+        "Quán Huế Ngon - 다낭최고의 로컬 BBQ 레스토랑- Best local food in Da Nang",
+        "Restaurant PHỞ HOUSE",
+        "Nhà hàng Mr.Anh - MR.ANH Local Vietnamese Cuisine Restaurant",
+        "Tiệm Ăn HK Vinh Hạnh",
+        "Nhà Hàng Phì Lũ 1",
+        "Đặc Sản Dê Núi Ninh Bình Tại Đà Nẵng-Nhà hàng Hoa Lư (Hoa Lu restaurant)",
+        "Sangha - Vegetarian Restaurant",
+        "Nhà hàng Nhà Gỗ Việt Đà Nẵng"
+      ],
+      "sem_q8": [
+        "Sandy Beach Non Nuoc Resort",
+        "Danang Marriott Resort & Spa",
+        "Da Nang Mikazuki Japanese Resort & Spa",
+        "Melia Danang Beach Resort",
+        "The Blossom Resort Island - All Inclusive",
+        "Intercontinental Danang Sun Peninsula Resort, an IHG hotel",
+        "Muong Thanh Luxury Da Nang Hotel",
+        "DLG Hotel Danang",
+        "Avatar Hotel Da Nang",
+        "Yarra Ocean Suites Danang"
+      ],
+      "sem_q9": [
+        "The Joy Cafe",
+        "Reply 1988 Cafe",
+        "KIM Cafe & Office",
+        "Good Coffee",
+        "Trình cà phê",
+        "Simple Garden Cafe",
+        "Ý Là Cafe Signature",
+        "NAM house Cafe",
+        "Cafe Cosy - Cà phê & trà",
+        "Ơi Cafe"
+      ],
+      "sem_q10": [
+        "Ăn Thôi - Michelin Bib Gourmand Awarded Vietnamese Restaurant / 안토이",
+        "@Limoncello Danang",
+        "Riverside Terrace Restaurant",
+        "Nhà hàng Làn Gió",
+        "The View - Yacht Restaurant Da Nang",
+        "Nhà hàng LoCo",
+        "Papa Steak",
+        "Nhà hàng Mr.Anh - MR.ANH Local Vietnamese Cuisine Restaurant",
+        "Bếp Lụa restaurant 베트남 식당",
+        "Au Restaurant"
+      ]
+    }
+  },
+  {
+    "type": "location_filtering",
+    "queries": {
+      "loc_q1": "restaurants in hai chau district",
+      "loc_q2": "hotels on vo nguyen giap street",
+      "loc_q3": "cafes in son tra peninsula",
+      "loc_q4": "bars on bach dang street",
+      "loc_q5": "museums in hai chau",
+      "loc_q6": "shopping in ngu hanh son",
+      "loc_q7": "restaurants on tran phu street",
+      "loc_q8": "hotels near my khe beach",
+      "loc_q9": "cafes in thanh khe district",
+      "loc_q10": "supermarkets in cam le district"
+    },
+    "ground_truth": {
+      "loc_q1": [
+        "Riverside Terrace Restaurant",
+        "Nhà hàng Nhà Gỗ Việt Đà Nẵng",
+        "Nhà hàng Bếp Việt",
+        "Nhà hàng Làn Gió",
+        "Papa Steak",
+        "Ăn Thôi - Michelin Bib Gourmand Awarded Vietnamese Restaurant / 안토이",
+        "Bếp Lụa restaurant 베트남 식당",
+        "Restaurant PHỞ HOUSE",
+        "Sangha - Vegetarian Restaurant",
+        "Anchor Restaurant & Beer (Bistro & Boutique)"
+      ],
+      "loc_q2": [
+        "Muong Thanh Luxury Da Nang Hotel",
+        "DLG Hotel Danang",
+        "Yarra Ocean Suites Danang",
+        "Altara Suites",
+        "The Trip 66",
+        "Paradise Beach Bar & Cinema Danang",
+        "Lounge Beach bar & Restaurant"
+      ],
+      "loc_q3": [
+        "CHEERS PUB & DINING",
+        "Navy Lounge",
+        "The Hangover Bar",
+        "Horizon Bar"
+      ],
+      "loc_q4": [
+        "Bamboo 2 Bar Danang",
+        "Sky Pub",
+        "Kết High cocktail bar - 켓 바 2",
+        "Ăn Thôi - Michelin Bib Gourmand Awarded Vietnamese Restaurant / 안토이",
+        "Bếp Lụa restaurant 베트남 식당"
+      ],
+      "loc_q5": [
+        "Bảo tàng Đà Nẵng",
+        "Bảo tàng Hồ Chí Minh",
+        "Bảo tàng Điêu khắc Chăm Đà Nẵng",
+        "Bảo tàng Mỹ thuật Đà Nẵng",
+        "PNT International Airport"
+      ],
+      "loc_q6": [
+        "Danang Souvenir & Stationery",
+        "Outstanda Handcraft - Local Handmade Souvenirs",
+        "Faifo Mart"
+      ],
+      "loc_q7": [
+        "Nhà hàng Làn Gió",
+        "@Limoncello Danang",
+        "Cà Phê Muối Huế 3 - N Salt Cafe Trần Phú",
+        "Local Gift - Da Nang Souvenir (다낭 기념품)",
+        "Hoa Lan Souvenir and Coffee Shop",
+        "Cỏ May Coffee & Souvenir Shop",
+        "Mộc Lan Souvenir Shop",
+        "Rio Souvenir",
+        "Hoa Ly Shop"
+      ],
+      "loc_q8": [
+        "DLG Hotel Danang",
+        "Muong Thanh Luxury Da Nang Hotel",
+        "Yarra Ocean Suites Danang",
+        "Avatar Hotel Da Nang",
+        "Grand Sunrise Boutique Hotel",
+        "Altara Suites"
+      ],
+      "loc_q9": [
+        "Good Coffee",
+        "Cà Phê muối Huế 2 - n salt Cafe Tản Đà",
+        "Cheers Restaurant"
+      ],
+      "loc_q10": [
+        "Farm And Mart",
+        "Co.opmart Đà Nẵng",
+        "MM Mega Market Đà Nẵng"
+      ]
+    }
+  },
+  {
+    "type": "distance_search",
+    "queries": {
+      "dist_q1": "restaurants near Dragon Bridge",
+      "dist_q2": "hotels near Da Nang Airport",
+      "dist_q3": "cafes near Han Market",
+      "dist_q4": "bars near My Khe Beach",
+      "dist_q5": "museums near Cham Museum",
+      "dist_q6": "restaurants near Marble Mountains",
+      "dist_q7": "hotels near Intercontinental Resort",
+      "dist_q8": "cafes near Vincom Plaza",
+      "dist_q9": "supermarkets near Lotte Mart",
+      "dist_q10": "restaurants near Danang Cathedral"
+    },
+    "ground_truth": {
+      "dist_q1": [
+        "Vấn Cocktail Bar",
+        "Tượng Cá Chép Hóa Rồng",
+        "Dragon fire show",
+        "Kết High cocktail bar - 켓 바 2",
+        "Bamboo 2 Bar Danang",
+        "Sky Pub",
+        "Ăn Thôi - Michelin Bib Gourmand Awarded Vietnamese Restaurant / 안토이",
+        "Local Gift - Da Nang Souvenir (다낭 기념품)",
+        "Bếp Lụa restaurant 베트남 식당",
+        "Central Market Đà Nẵng"
+      ],
+      "dist_q2": [
+        "AIRPORT Homestay",
+        "Brown Bean Hotel",
+        "Quán Quân Hotel",
+        "The Blossom Resort Island - All Inclusive",
+        "BonPas Bakery & Cafe",
+        "Farm And Mart",
+        "Homestay Halley & cho thuê xe máy",
+        "SPOT ON 806 Net Viet Homestay"
+      ],
+      "dist_q3": [
+        "The Joy Cafe",
+        "Trình cà phê",
+        "Central Market Đà Nẵng",
+        "Bảo tàng Đà Nẵng",
+        "Local Gift - Da Nang Souvenir (다낭 기념품)",
+        "Bếp Lụa restaurant 베트남 식당",
+        "Ăn Thôi - Michelin Bib Gourmand Awarded Vietnamese Restaurant / 안토이"
+      ],
+      "dist_q4": [
+        "Lounge Beach bar & Restaurant",
+        "CHEERS PUB & DINING",
+        "Scallywags Bar and Grill",
+        "Chevy sports bar and Bistro",
+        "The Original Shamrock Sports Bar Da Nang 🇮🇪 since 2019",
+        "Vertigo Sport Bar & Kitchen",
+        "Paradise Beach Bar & Cinema Danang"
+      ],
+      "dist_q5": [
+        "Bảo tàng Đà Nẵng",
+        "Công viên APEC",
+        "Bảo tàng Điêu khắc Chăm Đà Nẵng",
+        "PNT International Airport"
+      ],
+      "dist_q6": [
+        "Danang Marriott Resort & Spa",
+        "Melia Danang Beach Resort",
+        "Sandy Beach Non Nuoc Resort",
+        "Non Nuoc Stone Carving Memory Museum Da Nang City",
+        "Lua Silk Cultural Museum"
+      ],
+      "dist_q7": [
+        "Sel de Mer Hotel & Suites",
+        "Altara Suites",
+        "Navy Lounge",
+        "The Hangover Bar",
+        "CHEERS PUB & DINING",
+        "Horizon Bar"
+      ],
+      "dist_q8": [
+        "NAM house Cafe",
+        "Gé Cafe",
+        "Reply 1988 Cafe",
+        "The Joy Cafe"
+      ],
+      "dist_q9": [
+        "Farm And Mart",
+        "Sunny lotte mart Đà Nẵng",
+        "BonPas Bakery & Cafe",
+        "Restaurant PHỞ HOUSE"
+      ],
+      "dist_q10": [
+        "The Joy Cafe",
+        "Trình cà phê",
+        "Nhà hàng LoCo",
+        "L STORE",
+        "Fandy Store"
+      ]
+    }
+  },
+  {
+    "type": "combined_retrieval",
+    "queries": {
+      "comb_q1": "top 5 luxury hotels with ocean view and spa",
+      "comb_q2": "best vietnamese restaurants in hai chau with high rating",
+      "comb_q3": "rooftop bars near dragon bridge with city view",
+      "comb_q4": "family restaurants with outdoor seating near beach",
+      "comb_q5": "boutique hotels in downtown with pool facilities",
+      "comb_q6": "traditional cafes in old quarter with local atmosphere",
+      "comb_q7": "seafood restaurants within 2km of marble mountains",
+      "comb_q8": "budget hotels near airport with free wifi",
+      "comb_q9": "art galleries and museums in cultural district",
+      "comb_q10": "convenience stores and supermarkets open 24 hours"
+    },
+    "ground_truth": {
+      "comb_q1": [
+        "Intercontinental Danang Sun Peninsula Resort, an IHG hotel",
+        "Danang Marriott Resort & Spa",
+        "Melia Danang Beach Resort",
+        "Da Nang Mikazuki Japanese Resort & Spa",
+        "DLG Hotel Danang"
+      ],
+      "comb_q2": [
+        "Ăn Thôi - Michelin Bib Gourmand Awarded Vietnamese Restaurant / 안토이",
+        "Bếp Lụa restaurant 베트남 식당",
+        "Restaurant PHỞ HOUSE",
+        "Nhà hàng Mr.Anh - MR.ANH Local Vietnamese Cuisine Restaurant",
+        "Quán Huế Ngon - 다낭최고의 로컬 BBQ 레스토랑- Best local food in Da Nang"
+      ],
+      "comb_q3": [
+        "Vấn Cocktail Bar",
+        "Kết High cocktail bar - 켓 바 2",
+        "Sky Pub",
+        "EMBER - THE BALCONY BAR"
+      ],
+      "comb_q4": [
+        "Esco Beach Bar Lounge & Restaurant",
+        "Riverside Terrace Restaurant",
+        "The View - Yacht Restaurant Da Nang",
+        "Lounge Beach bar & Restaurant",
+        "Papa Steak"
+      ],
+      "comb_q5": [
+        "Fivitel Boutique Da Nang",
+        "Grand Sunrise Boutique Hotel",
+        "Avatar Hotel Da Nang",
+        "Satya Da Nang Hotel",
+        "Vanda Hotel"
+      ],
+      "comb_q6": [
+        "Trình cà phê",
+        "The Joy Cafe",
+        "Cà Phê Muối Huế 3 - N Salt Cafe Trần Phú",
+        "Reply 1988 Cafe",
+        "NAM house Cafe"
+      ],
+      "comb_q7": [
+        "Danang Marriott Resort & Spa",
+        "Melia Danang Beach Resort",
+        "Sandy Beach Non Nuoc Resort"
+      ],
+      "comb_q8": [
+        "AIRPORT Homestay",
+        "Brown Bean Hotel",
+        "The Blossom Resort Island - All Inclusive"
+      ],
+      "comb_q9": [
+        "Bảo tàng Mỹ thuật Đà Nẵng",
+        "Bảo tàng Điêu khắc Chăm Đà Nẵng",
+        "Bảo tàng 3D Art In Paradise",
+        "Danang Art Class | Art Supplies | Daily Art Workshop | 미술관",
+        "Bảo tàng Đà Nẵng"
+      ],
+      "comb_q10": [
+        "Full Market 24/7",
+        "LEE 24/7 CONVENIENCE STORE",
+        "K-Mart Đà Nẵng",
+        "Lotte Mart Đà Nẵng"
+      ]
+    }
+  }
+]

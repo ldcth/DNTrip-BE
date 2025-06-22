@@ -1,0 +1,514 @@
+{
+  "evaluation_summary": {
+    "total_techniques": 5,
+    "total_queries": 50,
+    "timestamp": "2025-06-18 21:24:37"
+  },
+  "technique_results": {
+    "category_filtering": {
+      "technique": "category_filtering",
+      "queries": {
+        "cat_q1": {
+          "query": "show me all restaurants",
+          "precision_at_5": 0.8,
+          "recall_at_5": 0.4,
+          "f1_score": 0.5333333333333333,
+          "mrr": 0.5,
+          "response_time": 5.984306335449219e-05,
+          "retrieved_count": 27
+        },
+        "cat_q2": {
+          "query": "find hotels in da nang",
+          "precision_at_5": 1.0,
+          "recall_at_5": 0.5,
+          "f1_score": 0.6666666666666666,
+          "mrr": 1.0,
+          "response_time": 2.193450927734375e-05,
+          "retrieved_count": 45
+        },
+        "cat_q3": {
+          "query": "list all cafes",
+          "precision_at_5": 1.0,
+          "recall_at_5": 0.5,
+          "f1_score": 0.6666666666666666,
+          "mrr": 1.0,
+          "response_time": 1.9788742065429688e-05,
+          "retrieved_count": 23
+        },
+        "cat_q4": {
+          "query": "show supermarkets",
+          "precision_at_5": 0.8,
+          "recall_at_5": 0.4,
+          "f1_score": 0.5333333333333333,
+          "mrr": 1.0,
+          "response_time": 2.0265579223632812e-05,
+          "retrieved_count": 21
+        },
+        "cat_q5": {
+          "query": "find bars and pubs",
+          "precision_at_5": 1.0,
+          "recall_at_5": 0.5,
+          "f1_score": 0.6666666666666666,
+          "mrr": 1.0,
+          "response_time": 2.002716064453125e-05,
+          "retrieved_count": 20
+        },
+        "cat_q6": {
+          "query": "museums in the area",
+          "precision_at_5": 0.8,
+          "recall_at_5": 0.4,
+          "f1_score": 0.5333333333333333,
+          "mrr": 0.5,
+          "response_time": 2.002716064453125e-05,
+          "retrieved_count": 16
+        },
+        "cat_q7": {
+          "query": "art galleries",
+          "precision_at_5": 1.0,
+          "recall_at_5": 0.5,
+          "f1_score": 0.6666666666666666,
+          "mrr": 1.0,
+          "response_time": 2.09808349609375e-05,
+          "retrieved_count": 19
+        },
+        "cat_q8": {
+          "query": "show me bakeries",
+          "precision_at_5": 1.0,
+          "recall_at_5": 0.5,
+          "f1_score": 0.6666666666666666,
+          "mrr": 1.0,
+          "response_time": 2.002716064453125e-05,
+          "retrieved_count": 19
+        },
+        "cat_q9": {
+          "query": "find camping grounds",
+          "precision_at_5": 1.0,
+          "recall_at_5": 0.5,
+          "f1_score": 0.6666666666666666,
+          "mrr": 1.0,
+          "response_time": 2.002716064453125e-05,
+          "retrieved_count": 21
+        },
+        "cat_q10": {
+          "query": "tourist attractions",
+          "precision_at_5": 1.0,
+          "recall_at_5": 0.5,
+          "f1_score": 0.6666666666666666,
+          "mrr": 1.0,
+          "response_time": 1.9788742065429688e-05,
+          "retrieved_count": 28
+        }
+      },
+      "avg_precision_at_5": 0.9399999999999998,
+      "avg_recall_at_5": 0.4699999999999999,
+      "avg_f1_score": 0.6266666666666667,
+      "avg_mrr": 0.9,
+      "avg_response_time": 2.4271011352539062e-05,
+      "total_queries": 10
+    },
+    "semantic_search": {
+      "technique": "semantic_search",
+      "queries": {
+        "sem_q1": {
+          "query": "romantic dinner restaurant with river view",
+          "precision_at_5": 0.4,
+          "recall_at_5": 0.2,
+          "f1_score": 0.26666666666666666,
+          "mrr": 0.5,
+          "response_time": 0.17884016036987305,
+          "retrieved_count": 10
+        },
+        "sem_q2": {
+          "query": "luxury beachfront hotel with spa facilities",
+          "precision_at_5": 0.4,
+          "recall_at_5": 0.2,
+          "f1_score": 0.26666666666666666,
+          "mrr": 0.3333333333333333,
+          "response_time": 0.03830099105834961,
+          "retrieved_count": 10
+        },
+        "sem_q3": {
+          "query": "cozy coffee shop for working",
+          "precision_at_5": 0.6,
+          "recall_at_5": 0.3,
+          "f1_score": 0.4,
+          "mrr": 1.0,
+          "response_time": 0.039652109146118164,
+          "retrieved_count": 10
+        },
+        "sem_q4": {
+          "query": "fresh seafood restaurant near beach",
+          "precision_at_5": 0.2,
+          "recall_at_5": 0.1,
+          "f1_score": 0.13333333333333333,
+          "mrr": 0.5,
+          "response_time": 0.006891012191772461,
+          "retrieved_count": 10
+        },
+        "sem_q5": {
+          "query": "budget friendly hotel downtown",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 0.0428922176361084,
+          "retrieved_count": 0
+        },
+        "sem_q6": {
+          "query": "rooftop bar with city view",
+          "precision_at_5": 0.6,
+          "recall_at_5": 0.3,
+          "f1_score": 0.4,
+          "mrr": 0.3333333333333333,
+          "response_time": 0.0067708492279052734,
+          "retrieved_count": 10
+        },
+        "sem_q7": {
+          "query": "traditional vietnamese cuisine",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 0.04406285285949707,
+          "retrieved_count": 10
+        },
+        "sem_q8": {
+          "query": "family friendly resort with pool",
+          "precision_at_5": 0.6,
+          "recall_at_5": 0.3,
+          "f1_score": 0.4,
+          "mrr": 0.5,
+          "response_time": 0.00708317756652832,
+          "retrieved_count": 7
+        },
+        "sem_q9": {
+          "query": "trendy cafe with good wifi",
+          "precision_at_5": 0.8,
+          "recall_at_5": 0.4,
+          "f1_score": 0.5333333333333333,
+          "mrr": 1.0,
+          "response_time": 0.008008956909179688,
+          "retrieved_count": 10
+        },
+        "sem_q10": {
+          "query": "fine dining michelin restaurant",
+          "precision_at_5": 0.4,
+          "recall_at_5": 0.2,
+          "f1_score": 0.26666666666666666,
+          "mrr": 0.5,
+          "response_time": 0.010962963104248047,
+          "retrieved_count": 10
+        }
+      },
+      "avg_precision_at_5": 0.39999999999999997,
+      "avg_recall_at_5": 0.19999999999999998,
+      "avg_f1_score": 0.26666666666666666,
+      "avg_mrr": 0.4666666666666666,
+      "avg_response_time": 0.03834652900695801,
+      "total_queries": 10
+    },
+    "location_filtering": {
+      "technique": "location_filtering",
+      "queries": {
+        "loc_q1": {
+          "query": "restaurants in hai chau district",
+          "precision_at_5": 0.6,
+          "recall_at_5": 0.3,
+          "f1_score": 0.4,
+          "mrr": 0.5,
+          "response_time": 0.0007498264312744141,
+          "retrieved_count": 10
+        },
+        "loc_q2": {
+          "query": "hotels on vo nguyen giap street",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 0.016705036163330078,
+          "retrieved_count": 0
+        },
+        "loc_q3": {
+          "query": "cafes in son tra peninsula",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 5.1975250244140625e-05,
+          "retrieved_count": 0
+        },
+        "loc_q4": {
+          "query": "bars on bach dang street",
+          "precision_at_5": 0.2,
+          "recall_at_5": 0.2,
+          "f1_score": 0.20000000000000004,
+          "mrr": 0.25,
+          "response_time": 0.007342100143432617,
+          "retrieved_count": 10
+        },
+        "loc_q5": {
+          "query": "museums in hai chau",
+          "precision_at_5": 0.6,
+          "recall_at_5": 0.6,
+          "f1_score": 0.6,
+          "mrr": 1.0,
+          "response_time": 5.507469177246094e-05,
+          "retrieved_count": 7
+        },
+        "loc_q6": {
+          "query": "shopping in ngu hanh son",
+          "precision_at_5": 0.4,
+          "recall_at_5": 0.6666666666666666,
+          "f1_score": 0.5,
+          "mrr": 0.25,
+          "response_time": 5.984306335449219e-05,
+          "retrieved_count": 10
+        },
+        "loc_q7": {
+          "query": "restaurants on tran phu street",
+          "precision_at_5": 0.2,
+          "recall_at_5": 0.1111111111111111,
+          "f1_score": 0.14285714285714285,
+          "mrr": 0.2,
+          "response_time": 0.008526086807250977,
+          "retrieved_count": 10
+        },
+        "loc_q8": {
+          "query": "hotels near my khe beach",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.16666666666666666,
+          "response_time": 0.0007050037384033203,
+          "retrieved_count": 10
+        },
+        "loc_q9": {
+          "query": "cafes in thanh khe district",
+          "precision_at_5": 1.0,
+          "recall_at_5": 0.6666666666666666,
+          "f1_score": 0.8,
+          "mrr": 1.0,
+          "response_time": 5.078315734863281e-05,
+          "retrieved_count": 2
+        },
+        "loc_q10": {
+          "query": "supermarkets in cam le district",
+          "precision_at_5": 0.5,
+          "recall_at_5": 0.3333333333333333,
+          "f1_score": 0.4,
+          "mrr": 1.0,
+          "response_time": 3.886222839355469e-05,
+          "retrieved_count": 2
+        }
+      },
+      "avg_precision_at_5": 0.35,
+      "avg_recall_at_5": 0.2877777777777778,
+      "avg_f1_score": 0.3042857142857143,
+      "avg_mrr": 0.4366666666666667,
+      "avg_response_time": 0.0034284591674804688,
+      "total_queries": 10
+    },
+    "distance_search": {
+      "technique": "distance_search",
+      "queries": {
+        "dist_q1": {
+          "query": "restaurants near Dragon Bridge",
+          "precision_at_5": 0.2,
+          "recall_at_5": 0.1,
+          "f1_score": 0.13333333333333333,
+          "mrr": 0.3333333333333333,
+          "response_time": 7.915496826171875e-05,
+          "retrieved_count": 10
+        },
+        "dist_q2": {
+          "query": "hotels near Da Nang Airport",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 0.01738905906677246,
+          "retrieved_count": 0
+        },
+        "dist_q3": {
+          "query": "cafes near Han Market",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 0.009794950485229492,
+          "retrieved_count": 10
+        },
+        "dist_q4": {
+          "query": "bars near My Khe Beach",
+          "precision_at_5": 0.4,
+          "recall_at_5": 0.2857142857142857,
+          "f1_score": 0.3333333333333333,
+          "mrr": 1.0,
+          "response_time": 0.0001800060272216797,
+          "retrieved_count": 10
+        },
+        "dist_q5": {
+          "query": "museums near Cham Museum",
+          "precision_at_5": 0.4,
+          "recall_at_5": 0.5,
+          "f1_score": 0.4444444444444445,
+          "mrr": 0.5,
+          "response_time": 0.007493019104003906,
+          "retrieved_count": 10
+        },
+        "dist_q6": {
+          "query": "restaurants near Marble Mountains",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 0.006588935852050781,
+          "retrieved_count": 10
+        },
+        "dist_q7": {
+          "query": "hotels near Intercontinental Resort",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 0.007114887237548828,
+          "retrieved_count": 0
+        },
+        "dist_q8": {
+          "query": "cafes near Vincom Plaza",
+          "precision_at_5": 0.6,
+          "recall_at_5": 0.75,
+          "f1_score": 0.6666666666666665,
+          "mrr": 1.0,
+          "response_time": 9.131431579589844e-05,
+          "retrieved_count": 10
+        },
+        "dist_q9": {
+          "query": "supermarkets near Lotte Mart",
+          "precision_at_5": 0.2,
+          "recall_at_5": 0.25,
+          "f1_score": 0.22222222222222224,
+          "mrr": 0.25,
+          "response_time": 6.29425048828125e-05,
+          "retrieved_count": 10
+        },
+        "dist_q10": {
+          "query": "restaurants near Danang Cathedral",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 0.007077217102050781,
+          "retrieved_count": 10
+        }
+      },
+      "avg_precision_at_5": 0.18,
+      "avg_recall_at_5": 0.18857142857142856,
+      "avg_f1_score": 0.18,
+      "avg_mrr": 0.3083333333333333,
+      "avg_response_time": 0.005587148666381836,
+      "total_queries": 10
+    },
+    "combined_retrieval": {
+      "technique": "combined_retrieval",
+      "queries": {
+        "comb_q1": {
+          "query": "top 5 luxury hotels with ocean view and spa",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 0.04246878623962402,
+          "retrieved_count": 0
+        },
+        "comb_q2": {
+          "query": "best vietnamese restaurants in hai chau with high rating",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 5.412101745605469e-05,
+          "retrieved_count": 0
+        },
+        "comb_q3": {
+          "query": "rooftop bars near dragon bridge with city view",
+          "precision_at_5": 0.2,
+          "recall_at_5": 0.25,
+          "f1_score": 0.22222222222222224,
+          "mrr": 0.3333333333333333,
+          "response_time": 0.03864121437072754,
+          "retrieved_count": 10
+        },
+        "comb_q4": {
+          "query": "family restaurants with outdoor seating near beach",
+          "precision_at_5": 0.4,
+          "recall_at_5": 0.4,
+          "f1_score": 0.4000000000000001,
+          "mrr": 1.0,
+          "response_time": 0.00011920928955078125,
+          "retrieved_count": 10
+        },
+        "comb_q5": {
+          "query": "boutique hotels in downtown with pool facilities",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 6.604194641113281e-05,
+          "retrieved_count": 0
+        },
+        "comb_q6": {
+          "query": "traditional cafes in old quarter with local atmosphere",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 3.910064697265625e-05,
+          "retrieved_count": 0
+        },
+        "comb_q7": {
+          "query": "seafood restaurants within 2km of marble mountains",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 3.314018249511719e-05,
+          "retrieved_count": 0
+        },
+        "comb_q8": {
+          "query": "budget hotels near airport with free wifi",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 0.0074198246002197266,
+          "retrieved_count": 0
+        },
+        "comb_q9": {
+          "query": "art galleries and museums in cultural district",
+          "precision_at_5": 0.0,
+          "recall_at_5": 0.0,
+          "f1_score": 0.0,
+          "mrr": 0.0,
+          "response_time": 5.2928924560546875e-05,
+          "retrieved_count": 0
+        },
+        "comb_q10": {
+          "query": "convenience stores and supermarkets open 24 hours",
+          "precision_at_5": 0.2,
+          "recall_at_5": 0.25,
+          "f1_score": 0.22222222222222224,
+          "mrr": 1.0,
+          "response_time": 0.0072019100189208984,
+          "retrieved_count": 10
+        }
+      },
+      "avg_precision_at_5": 0.08,
+      "avg_recall_at_5": 0.09,
+      "avg_f1_score": 0.08444444444444446,
+      "avg_mrr": 0.2333333333333333,
+      "avg_response_time": 0.009609627723693847,
+      "total_queries": 10
+    }
+  }
+}

@@ -9,7 +9,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, ToolMessage, AIMessage
 from langchain_community.tools.tavily_search import TavilySearchResults
 from agents.state import AgentState
-from agents.tools import plan_da_nang_trip_tool, show_flights_tool, RequestClarificationArgs, select_flight_tool_func, SelectFlightArgs
+from agents.tools import plan_da_nang_trip_tool, show_flights_tool, RequestClarificationArgs, select_flight_tool_func, SelectFlightArgs, search_places_rag_tool
 import json
 import logging
 from services.flight_selection import select_flight_for_booking
@@ -25,6 +25,7 @@ from .prompts import (
     PLAN_AGENT_SYSTEM_PROMPT,
     FLIGHT_AGENT_SYSTEM_PROMPT,
     INFORMATION_AGENT_SYSTEM_PROMPT,
+    PLACES_AGENT_SYSTEM_PROMPT,
     GENERAL_QA_SYSTEM_PROMPT,
 )
 from .agent_helpers import get_natural_clarification_question, prepare_response_payload
@@ -63,6 +64,7 @@ class Agent:
         self.planner_tool = plan_da_nang_trip_tool
         self.flight_tool = show_flights_tool
         self.select_flight_tool = select_flight_tool_func
+        self.rag_tool = search_places_rag_tool
 
         # Define the conceptual tool for clarification using its Pydantic schema
         self.request_clarification_tool = StructuredTool.from_function(
@@ -77,6 +79,7 @@ class Agent:
             self.planner_tool,
             self.flight_tool,
             self.select_flight_tool,
+            self.rag_tool,
             self.request_clarification_tool
         ])
 
@@ -133,6 +136,7 @@ class Agent:
                 "plan_agent": "call_llm_with_tools",
                 "flight_agent": "call_llm_with_tools",
                 "information_agent": "call_llm_with_tools",
+                "places_agent": "call_llm_with_tools",
                 "retrieve_information": "retrieve_stored_information",
                 "general_qa_agent": "call_llm_with_tools",
                 "error": END
@@ -162,7 +166,7 @@ class Agent:
         )
 
         self.graph = self.graph.compile(checkpointer=self.memory)
-        self.tools = {t.name: t for t in [self.tavily_search, self.planner_tool, self.flight_tool, self.select_flight_tool]}
+        self.tools = {t.name: t for t in [self.tavily_search, self.planner_tool, self.flight_tool, self.select_flight_tool, self.rag_tool]}
         self.tools[self.request_clarification_tool.name] = None
 
     def _get_system_prompt_for_intent(self, intent: str) -> str:
@@ -171,6 +175,7 @@ class Agent:
             "plan_agent": PLAN_AGENT_SYSTEM_PROMPT,
             "flight_agent": FLIGHT_AGENT_SYSTEM_PROMPT,
             "information_agent": INFORMATION_AGENT_SYSTEM_PROMPT,
+            "places_agent": PLACES_AGENT_SYSTEM_PROMPT,
             "general_qa_agent": GENERAL_QA_SYSTEM_PROMPT,
         }
         return prompt_mapping.get(intent, SYSTEM_PROMPT)  # Default to original prompt if intent not found
@@ -181,13 +186,15 @@ class Agent:
             return [self.planner_tool, self.request_clarification_tool]
         elif intent == "flight_agent":
             return [self.flight_tool, self.select_flight_tool, self.request_clarification_tool]
+        elif intent == "places_agent":
+            return [self.rag_tool, self.request_clarification_tool]
         elif intent == "information_agent":
             return [self.tavily_search, self.request_clarification_tool]
         elif intent == "general_qa_agent":
             return [self.request_clarification_tool]  # Minimal tools for general QA
         else:
             # Default: all tools available
-            return [self.tavily_search, self.planner_tool, self.flight_tool, self.select_flight_tool, self.request_clarification_tool]
+            return [self.tavily_search, self.planner_tool, self.flight_tool, self.select_flight_tool, self.rag_tool, self.request_clarification_tool]
 
     def _prepare_messages_for_llm(self, current_messages: list[AnyMessage], system_prompt: str, max_human_interactions: int = 5) -> list[AnyMessage]:
         """
@@ -336,6 +343,56 @@ class Agent:
 
         return {"relevance_decision": decision}
 
+    def _fallback_relevance_check(self, user_message: HumanMessage, information: dict, conversation_history: list) -> str:
+        """
+        Fallback method to determine relevance when LLM doesn't follow strict instructions.
+        Uses rule-based logic to analyze the query and context.
+        """
+        query = user_message.content.lower().strip()
+        
+        # Direct Da Nang travel keywords
+        danang_keywords = [
+            "da nang", "danang", "đà nẵng", "flight", "flights", "plan", "trip", "travel", 
+            "hotel", "restaurant", "beach", "attraction", "ba na hills", "marble mountains", 
+            "dragon bridge", "han market", "my khe", "hoi an", "hanoi", "ho chi minh", "saigon"
+        ]
+        
+        # Flight-related actions that are clearly travel-related
+        flight_actions = [
+            "book", "select", "choose", "first", "second", "third", "flight", "1st", "2nd", "3rd"
+        ]
+        
+        # Check for direct keyword matches
+        if any(keyword in query for keyword in danang_keywords):
+            print(f"Fallback: Found Da Nang keyword in query: {query}")
+            return "continue"
+        
+        # Check for flight selection context
+        if information.get('available_flights') and any(action in query for action in flight_actions):
+            print(f"Fallback: Flight selection context detected with available flights")
+            return "continue"
+        
+        # Check for plan modification context
+        if information.get('current_trip_plan') and any(word in query for word in ["modify", "change", "add", "update", "plan"]):
+            print(f"Fallback: Plan modification context detected")
+            return "continue"
+        
+        # Check conversation history for flight/travel context
+        if conversation_history:
+            recent_context = " ".join([
+                msg.content.lower() if hasattr(msg, 'content') and isinstance(msg.content, str) else ""
+                for msg in conversation_history[-3:]  # Check last 3 messages
+                if hasattr(msg, 'content')
+            ])
+            
+            if any(keyword in recent_context for keyword in danang_keywords):
+                print(f"Fallback: Found travel context in recent conversation history")
+                return "continue"
+        
+        # If no clear relevance indicators found
+        print(f"Fallback: No clear Da Nang travel relevance found in query or context")
+        return "end"
+
     def route_based_on_relevance(self, state: AgentState):
         decision = state.get("relevance_decision")
         if decision:
@@ -386,7 +443,7 @@ class Agent:
             response = self.router_llm.invoke([intent_prompt, user_message])
             intent = response.content.strip().lower()
             print(f"LLM-based intent routing for query '{user_message.content[:50]}...': {intent}")
-            valid_intents = ["plan_agent", "flight_agent", "information_agent", "retrieve_information", "general_qa_agent"]
+            valid_intents = ["plan_agent", "flight_agent", "information_agent", "retrieve_information", "places_agent", "general_qa_agent"]
             if intent not in valid_intents:
                 print(f"Warning: LLM-based intent routing returned unexpected value: {intent}. Defaulting to 'general_qa_agent'.")
                 intent = "general_qa_agent"
@@ -399,7 +456,7 @@ class Agent:
 
     def route_based_on_intent(self, state: AgentState):
         intent = state.get("intent")
-        valid_intents = {'plan_agent', 'flight_agent', 'information_agent', 'retrieve_information', 'general_qa_agent'}
+        valid_intents = {'plan_agent', 'flight_agent', 'information_agent', 'retrieve_information', 'places_agent', 'general_qa_agent'}
         if intent not in valid_intents:
             print(f"Warning: Unrecognized intent '{intent}'. Routing to general QA.")
             return "general_qa_agent"
@@ -842,7 +899,9 @@ class Agent:
                 if isinstance(final_graph_message_obj, AIMessage):
                     final_ai_message_content = final_graph_message_obj.content
                 elif isinstance(final_graph_message_obj, ToolMessage):
-                    final_ai_message_content = f"Tool execution resulted in: {final_graph_message_obj.content}"
+                    # final_ai_message_content = f"Tool execution resulted in: {final_graph_message_obj.content}"
+                    final_ai_message_content = f"{final_graph_message_obj.content}"
+
                     logging.warning(f"Graph ended with ToolMessage for thread {thread_id}: {final_graph_message_obj.content}")
                 else:
                     final_ai_message_content = f"Conversation ended unexpectedly. Last message type: {type(final_graph_message_obj).__name__}"

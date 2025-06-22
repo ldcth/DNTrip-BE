@@ -3,9 +3,13 @@ from langchain_core.tools import tool, StructuredTool
 from pydantic import BaseModel, Field
 from services.tsp_algorithm import optimize_distance_tour
 from services.flight_picking import get_flights as get_flights_service # Renamed import
+from services.retriever_service import RetrieverService  
+from langchain_openai import ChatOpenAI  
+from langchain_core.messages import SystemMessage, HumanMessage 
 import json
 import traceback
-from typing import List, Optional, Dict, Any # Added Optional, List, Dict, Any
+import os
+from typing import List, Optional, Dict, Any 
 
 class SpecificStop(BaseModel):
     name: str = Field(description="Name of the place or activity.")
@@ -216,4 +220,185 @@ def select_flight_tool_func(selection_type: str, selection_value: str) -> str:
     return json.dumps({"selection_type": selection_type, "selection_value": selection_value, "message": "Selection parameters captured for processing."})
 
 # Add more tools as needed (e.g., search_activities, check_weather, schedule_event)
+
+# --- RAG Tool for Place/Restaurant Retrieval ---
+class RAGSearchArgs(BaseModel):
+    query: str = Field(description="Natural language query for finding places, restaurants, or hotels. Examples: 'top 5 restaurants in hải châu', 'find hotels near the beach', 'best cafes with high rating', 'restaurants near Fivitel Da Nang Hotel'.")
+
+@tool("search_places_rag", args_schema=RAGSearchArgs)
+def search_places_rag_tool(query: str) -> str:
+    """
+    Searches for places, restaurants, or hotels in Da Nang using advanced RAG (Retrieval-Augmented Generation) capabilities.
+    
+    This tool can handle various types of queries:
+    - Location-based searches: "restaurants in hải châu district"
+    - Distance-based searches: "hotels near the beach", "cafes near Fivitel Da Nang Hotel"
+    - Rating-based searches: "top 5 restaurants by rating"
+    - Semantic searches: "romantic dinner places", "budget-friendly accommodations"
+    
+    The tool automatically determines the best search strategy (keyword, distance-based, or semantic search)
+    based on the query content and returns detailed information about matching places.
+    
+    Returns a JSON string with search results including place details like name, rating, address, 
+    coordinates, and additional metadata.
+    """
+    print(f"--- Calling RAG Search Tool with query: '{query}' ---")
+    
+    try:
+        retriever = RetrieverService()
+        
+        intent = parse_rag_intent(query)
+        print(f"Parsed intent: {intent}")
+        
+        results = retriever.retrieve_places(intent)
+        
+        response = {
+            "query": query,
+            "intent": intent,
+            "results_count": len(results),
+            "results": results
+        }
+        
+        # Add summary information
+        if results:
+            response["summary"] = f"Found {len(results)} places matching your query."
+            if intent.get("location_ref"):
+                response["summary"] += f" Results are sorted by distance from '{intent['location_ref']}'."
+            elif intent.get("location_filter"):
+                response["summary"] += f" Results are filtered for '{intent['location_filter']}' area."
+            else:
+                response["summary"] += " Results are based on semantic similarity to your query."
+        else:
+            response["summary"] = "No places found matching your query. Try rephrasing or using different keywords."
+        
+        return json.dumps(response, indent=2, ensure_ascii=False)
+        
+    except Exception as e:
+        print(f"Error in search_places_rag_tool: {e}")
+        traceback.print_exc()
+        
+        error_response = {
+            "error": f"An error occurred while searching for places: {str(e)}",
+            "query": query,
+            "results_count": 0,
+            "results": []
+        }
+        return json.dumps(error_response, indent=2, ensure_ascii=False)
+
+def parse_rag_intent(query: str) -> Dict[str, Any]:
+    """
+    Uses an LLM to parse a user query and extract structured information for RAG retrieval.
+    
+    Args:
+        query: The user's natural language query.
+        
+    Returns:
+        A dictionary containing the parsed intent.
+    """
+    print(f"--- Parsing RAG intent with LLM for query: '{query}' ---")
+    
+    # Initialize LLM for intent parsing
+    llm = ChatOpenAI(
+        model=os.getenv("MODEL_VERSION"),
+        temperature=0,
+        api_key=os.getenv("OPENAI_API_KEY")
+    )
+    
+    # Create the prompt for intent parsing
+    intent_parsing_prompt = """You are an expert at parsing user queries about places and services in Da Nang, Vietnam.
+
+Your task is to extract structured information from the user's query and return it as a JSON object.
+
+Extract the following information:
+1. **entity_type**: The type of place being searched for. Must be one of these exact categories:
+   - tourist_attraction (for sightseeing, landmarks, monuments, viewpoints)
+   - restaurant (for dining establishments)
+   - cafe (for coffee shops, tea houses)
+   - bar (for nightlife, pubs, lounges)
+   - bakery (for bread shops, pastry shops)
+   - supermarket (for grocery stores, markets)
+   - shopping_mall (for malls, shopping centers)
+   - store (for general retail shops)
+   - souvenir_store (for gift shops, souvenir shops)
+   - clothing_store (for fashion, apparel shops)
+   - campground (for camping sites, glamping)
+   - museum (for museums, cultural centers)
+   - art_gallery (for art galleries, exhibition spaces)
+   - park (for parks, gardens, green spaces)
+   - zoo (for zoos, wildlife parks)
+   - aquarium (for aquariums, marine centers)
+   - amusement_park (for theme parks, entertainment venues)
+   - stadium (for sports venues, stadiums)
+   - hospital (for medical facilities)
+   - pharmacy (for pharmacies, drug stores)
+   - atm (for ATM locations, banks)
+   - hotel (for accommodations, resorts, hostels)
+   - place (for general searches or when category is unclear)
+
+2. **top_k**: Number of results requested (default: 5)
+3. **location_filter**: Specific area/district mentioned (e.g., "hai chau", "son tra", "ngu hanh son", "cam le")
+4. **location_ref**: Reference location for "near X" queries (e.g., "near Dragon Bridge", "near beach")
+5. **sort_by**: How to sort results (rating, distance, relevance) (default: rating)
+
+Rules:
+- Choose the most specific entity_type that matches the query
+- If user asks for "near X", set location_ref to X and sort_by to "distance"
+- If user asks for places "in X area", set location_filter to X and sort_by to "rating"
+- If user asks for "top/best", set sort_by to "rating"
+- Default entity_type is "place" if unclear
+- Default top_k is 5
+- Default sort_by is "relevance"
+
+Examples:
+Query: "top 5 restaurants in hai chau district"
+Response: {"entity_type": "restaurant", "top_k": 5, "location_filter": "hai chau", "sort_by": "rating", "location_ref": null}
+
+Query: "hotels near my khe beach"
+Response: {"entity_type": "hotel", "top_k": 5, "location_filter": null, "sort_by": "distance", "location_ref": "my khe beach"}
+
+Query: "best cafes with high rating"
+Response: {"entity_type": "cafe", "top_k": 5, "location_filter": null, "sort_by": "rating", "location_ref": null}
+
+Query: "museums downtown"
+Response: {"entity_type": "museum", "top_k": 5, "location_filter": "downtown", "sort_by": "rating", "location_ref": null}
+
+Query: "souvenir shops near Dragon Bridge"
+Response: {"entity_type": "souvenir_store", "top_k": 5, "location_filter": null, "sort_by": "distance", "location_ref": "Dragon Bridge"}
+
+Query: "parks for kids"
+Response: {"entity_type": "park", "top_k": 5, "location_filter": null, "sort_by": "rating", "location_ref": null}
+
+Query: "shopping malls with good stores"
+Response: {"entity_type": "shopping_mall", "top_k": 5, "location_filter": null, "sort_by": "rating", "location_ref": null}
+
+Query: "tourist attractions to visit"
+Response: {"entity_type": "tourist_attraction", "top_k": 5, "location_filter": null, "sort_by": "rating", "location_ref": null}
+
+Return ONLY the JSON object, no other text."""
+
+    try:
+        messages = [
+            SystemMessage(content=intent_parsing_prompt),
+            HumanMessage(content=f"Query: \"{query}\"")
+        ]
+        
+        response = llm.invoke(messages)
+        
+        intent_json = json.loads(response.content.strip())
+        
+        intent_json["original_query"] = query.lower()
+        
+        print(f"LLM parsed intent: {intent_json}")
+        return intent_json
+        
+    except Exception as e:
+        print(f"Error in LLM intent parsing: {e}. Falling back to default intent.")
+        return {
+            "entity_type": "place",
+            "top_k": 5,
+            "location_filter": None,
+            "sort_by": "relevance",
+            "location_ref": None,
+            "original_query": query.lower()
+        }
 

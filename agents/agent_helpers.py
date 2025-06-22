@@ -120,7 +120,7 @@ def prepare_response_payload(final_state: AgentState, final_ai_message_content: 
     if response_payload["intent"] == "error" and response_payload["response"]["message"] == "Error: Could not determine agent's final message.":
          response_payload["response"]["message"] = "Agent encountered an issue processing the request."
     
-    valid_intents = ["plan_agent", "flight_agent", "information_agent", "general_qa_agent",
+    valid_intents = ["plan_agent", "flight_agent", "places_agent", "information_agent", "general_qa_agent",
                      "direct_answer", "not_related", "error", "tool_result",
                      "flight_selection_confirmed", "flights_found_awaiting_selection",
                      "clarification_request", "flight_search_direct_message",

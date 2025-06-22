@@ -42,7 +42,13 @@ def parse_intent(query: str) -> Dict[str, Any]:
     'shopping mall', 'store', 'souvenir store', 'clothing store', 'campground',
     'museum', 'art_gallery',
     'park', 'zoo', 'aquarium', 'amusement park', 'stadium',
-    'hospital', 'pharmacy', 'atm'
+    'hospital', 'pharmacy', 'atm',
+    'tourist attractions', 'restaurants', 'cafes', 'bars',
+    'bakeries', 'supermarkets',
+    'shopping malls', 'stores', 'souvenir stores', 'clothing stores', 'campgrounds',
+    'museums', 'art galleries',
+    'parks', 'zoos', 'aquariums', 'amusement parks', 'stadiums',
+    'hospitals', 'pharmacies', 'atms',
 ]
     for entity in entity_keywords:
         if entity in query:
