@@ -10,6 +10,7 @@ from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, Too
 from langchain_community.tools.tavily_search import TavilySearchResults
 from agents.state import AgentState
 from agents.tools import plan_da_nang_trip_tool, show_flights_tool, RequestClarificationArgs, select_flight_tool_func, SelectFlightArgs, search_places_rag_tool
+from agents.progress_manager import progress_manager
 import json
 import logging
 from services.flight_selection import select_flight_for_booking
@@ -168,6 +169,20 @@ class Agent:
         self.graph = self.graph.compile(checkpointer=self.memory)
         self.tools = {t.name: t for t in [self.tavily_search, self.planner_tool, self.flight_tool, self.select_flight_tool, self.rag_tool]}
         self.tools[self.request_clarification_tool.name] = None
+        
+        # For tracking current thread_id during conversation
+        self._current_thread_id = None
+
+    def _emit_progress(self, phase: str, message: str, tool_name: str = None, is_loading: bool = True):
+        """Emit progress event for the current conversation thread"""
+        if self._current_thread_id:
+            progress_manager.emit_progress(
+                thread_id=self._current_thread_id,
+                phase=phase,
+                message=message,
+                tool_name=tool_name,
+                is_loading=is_loading
+            )
 
     def _get_system_prompt_for_intent(self, intent: str) -> str:
         """Get the appropriate system prompt based on the current intent."""
@@ -233,6 +248,8 @@ class Agent:
         return [system_message_to_use] + history_slice
 
     def initial_router(self, state: AgentState):
+        self._emit_progress("initial_router", "🔍 Understanding your request...")
+        
         user_message = state['messages'][-1]
         if not isinstance(user_message, HumanMessage):
              print("Warning: Expected last message to be HumanMessage for initial routing.")
@@ -266,6 +283,8 @@ class Agent:
         return validated_query_type
 
     def direct_llm_answer(self, state: AgentState):
+        self._emit_progress("direct_llm_answer", "💬 Preparing response...")
+        
         messages_from_state = state['messages']
         
         # Use the specific prompt for direct answers (persona, history, simple questions)
@@ -281,6 +300,8 @@ class Agent:
         return {'messages': [response_message]}
 
     def check_relevance(self, state: AgentState):
+        self._emit_progress("relevance_checker", "✅ Validating travel query...")
+        
         print("--- Checking Relevance (with limited history & info) ---")
 
         if not state['messages'] or not isinstance(state['messages'][-1], HumanMessage):
@@ -403,6 +424,8 @@ class Agent:
              return "end"
 
     def route_intent(self, state: AgentState):
+        self._emit_progress("intent_router", "🎯 Determining best approach...")
+        
         print("--- Routing Intent ---")
         
         if len(state['messages']) >= 4:
@@ -464,6 +487,8 @@ class Agent:
         return intent
 
     def call_llm_with_tools(self, state: AgentState):
+        self._emit_progress("call_llm_with_tools", "🤖 AI is analyzing...")
+        
         print("--- Calling LLM with Tools ---")
         current_messages = state['messages']
         
@@ -538,6 +563,8 @@ class Agent:
         return END
 
     def clarification_node(self, state: AgentState):
+        self._emit_progress("clarification_node", "❓ Need more details...")
+        
         print("--- Clarification Node ---")
         
         last_ai_message = state['messages'][-1]
@@ -586,6 +613,17 @@ class Agent:
         current_final_tool_name = state.get('final_response_tool_name')
         current_information = state.get('information') if state.get('information') is not None else {}
 
+        # Tool-specific progress messages
+        tool_progress_map = {
+            'show_flights': "✈️ Searching flights...",
+            'plan_da_nang_trip': "📝 Creating itinerary...",
+            'search_places_rag_tool': "📍 Finding places...",
+            'search_places_rag': "📍 Finding places...",
+            'tavily_search': "🔍 Gathering information...",
+            'tavily_search_results_json': "🔍 Gathering information...",
+            'select_flight_tool': "✅ Selecting flight..."
+        }
+
         for t in tool_calls:
             tool_call_id = t.get('id')
             if not tool_call_id:
@@ -594,6 +632,11 @@ class Agent:
 
             tool_name = t.get('name')
             tool_args = t.get('args', {})
+            
+            # Emit tool-specific progress
+            progress_message = tool_progress_map.get(tool_name, f"🔧 Using {tool_name}...")
+            self._emit_progress("action", progress_message, tool_name=tool_name)
+            
             print(f"Attempting to call tool: {tool_name} with args: {tool_args} (Call ID: {tool_call_id})")
             result_content_for_message = f"Error: Tool {tool_name} execution failed." # Default
 
@@ -817,6 +860,8 @@ class Agent:
         return {"messages": [AIMessage(content="I apologize, but I specialize only in travel related to Da Nang, Vietnam, including planning trips there and checking flights from major Vietnamese cities. I cannot answer questions outside this scope.")]}
 
     def retrieve_stored_information(self, state: AgentState):
+        self._emit_progress("retrieve_stored_information", "💾 Retrieving saved info...")
+        
         print("---RETRIEVING STORED INFORMATION---")
         messages = state['messages']
         last_human_message = messages[-1]
@@ -858,6 +903,10 @@ class Agent:
             }
 
     def run_conversation(self, query: str, thread_id: str | None = None):
+        # Set the current thread_id for progress tracking
+        self._current_thread_id = thread_id
+        print(f"[Agent] Set current thread ID for progress tracking: {thread_id}")
+        
         messages = [HumanMessage(content=query)]
         thread = {"configurable": {"thread_id": thread_id}}
 
@@ -920,6 +969,11 @@ class Agent:
                  "thread_id": thread_id,
                  "type": "Error"
              }
+        finally:
+            # Complete progress and cleanup
+            if self._current_thread_id:
+                progress_manager.complete_progress(self._current_thread_id, "✅ Done!")
+                self._current_thread_id = None
 
         print(f"--- Returning response payload for thread {thread_id}: Intent='{response_payload['intent']}', Type='{response_payload['type']}' ---")
         return response_payload

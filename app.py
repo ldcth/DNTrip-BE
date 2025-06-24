@@ -1,13 +1,15 @@
 # Import necessary Flask libraries and extensions
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv 
 import uuid
+import json
 from agents.llm import LLMAgent # Keep if needed for /api/ask
 from agents.graph import Agent
+from agents.progress_manager import progress_manager
 from database.user import Users
 from database.conversation import Conversations
 from database.content import Contents
@@ -176,13 +178,33 @@ def handle_travel_chat():
 @app.route('/health', methods=['GET'])  
 def health_check():
     """Provides a simple health check endpoint for monitoring."""
-    travel_app_status = "OK" if travel_planner_instance and travel_planner_instance.app else "Error: Travel App not initialized"
+    travel_app_status = "OK" if travel_planner_instance and travel_planner_instance.graph else "Error: Travel App not initialized"
     return jsonify({
         "status": "OK", # Overall status of the Flask app itself
         "components": {
             "travel_planner": travel_app_status
         }
     })
+
+# --- SSE Progress Endpoint ---
+@app.route('/api/chat/progress/<thread_id>', methods=['GET'])
+def stream_progress(thread_id):
+    """Stream real-time progress updates for a conversation thread using SSE."""
+    def generate():
+        try:
+            for event in progress_manager.get_progress_generator(thread_id):
+                yield event
+        except Exception as e:
+            print(f"[SSE] Error streaming progress for thread {thread_id}: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    response = Response(generate(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Cache-Control'
+    
+    return response
 
 @app.route('/api/user/chat', methods=['POST'])
 @jwt_required()
